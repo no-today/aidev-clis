@@ -1,0 +1,10 @@
+# Copy to ~/.aidev-clis/actors.yaml and edit. The account library shared by apicli.
+# Keyed app → actor → vars. The vars fill the login flow's {{...}} templates and
+# satisfy each app's `vars_required`. Select one with `--actor <name>` (or the
+# app's default_actor). Multiple accounts per app coexist — sessions are keyed
+# per (app, actor, env), so you can stay logged in as several at once.
+# This file is optional; an app with no login (kind: none) needs no actor.
+actors:
+  svc-login:
+    alice: { phoneNo: "13800000000", password: "***", orgId: "999" }
+    bob: { phoneNo: "13800000001", password: "***", orgId: "999" }

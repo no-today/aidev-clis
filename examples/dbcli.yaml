@@ -1,0 +1,92 @@
+# Copy to ~/.aidev-clis/dbcli.yaml and edit. `dbcli <driver> --target <name> "<sql>"`.
+default_target: app
+
+targets:
+  # mysql: the credential should be a scoped account (e.g. read-only, or write
+  # access only where you need it) — that account is the real security boundary;
+  # the statement guard + --allow-write are defense-in-depth on top.
+  app:
+    adapter: mysql
+    # scene: companyA   # optional: tag for `aidev` discovery; omit => global. See examples/.aidev.yaml
+    description: app db
+    dsn: mysql://app_ro@10.0.0.1:3306/app   # password injected from credential
+    credential: db.app.password              # credential NAME → credentials/db.app.password (0600); the DB password
+    # TLS off by default; enable in the DSN query, not a separate key:
+    #   mysql:       ?tls=skip-verify|true|preferred
+    #   postgres/kingbase: ?sslmode=require|verify-full   (or a top-level `sslmode:` field)
+    # ssh:                                   # optional: reach the DB through a bastion
+    #   host: bastion.example.com            #   (managed cloud RDS is often ONLY reachable this way)
+    #   port: 22                             #   bastion ssh port (default 22)
+    #   user: deploy
+    #   identity_file: ~/.ssh/id_ed25519     # key auth (+ key_passphrase_credential if encrypted)
+    #   # password_credential: ssh.bastion.password   # OR password auth (credstore key)
+
+  # postgres / kingbase: the "database" you query is a pg SCHEMA; the outer pg database
+  # is fixed here in the DSN (one business DB per target). kingbase = same wire path.
+  # Aliyun Hologres also speaks the pg wire protocol — reach it via this adapter:
+  # point the DSN at its endpoint (port 80), username = AccessKey ID, AccessKey
+  # secret injected from the credential.
+  analytics:
+    adapter: postgres
+    description: analytics db
+    dsn: postgres://app_ro@10.0.0.2:5432/analytics   # pg default port 5432
+    credential: db.analytics.password
+    # TLS off by default; add ?sslmode=require|verify-full to the DSN above,
+    # or set a top-level `sslmode:` field here.
+
+  # kingbase speaks the pg wire protocol; only the default port and the excluded
+  # Oracle-compat system schemas (sys/sysaudit/oracle/sys_catalog) differ.
+  biz:
+    adapter: kingbase
+    description: business db
+    dsn: postgres://app_ro@10.0.0.9:54321/bizdb   # kingbase default port 54321
+    credential: db.biz.password
+
+  # redis: command pass-through (read / write-needs--allow-write / admin-refused).
+  # The "database" is the numeric logical DB in the DSN path.
+  cache:
+    adapter: redis
+    description: cache
+    dsn: redis://app_ro@10.0.0.3:6379/0
+    credential: db.cache.password
+
+  # sqlite: a local file — no credential, no tunnel. The boundary is the file's
+  # own permissions; add ?mode=ro to open it read-only. The "database" namespace
+  # is the ATTACHed-DB name (default `main`); a single-file DB needs no --database.
+  local:
+    adapter: sqlite
+    description: local app db
+    dsn: "file:/var/lib/app/app.db?mode=ro"   # file: URI; ?mode=ro opens read-only
+    # dsn: "file:C:/data/app.db?mode=ro"       # Windows: forward slashes in the URI
+    # Drop ?mode=ro for writes (DML still needs --allow-write per statement).
+
+  # mongo: native mongosh statements, e.g.
+  #   dbcli mongo --target docs 'db.users.find({active:true}).limit(50)'
+  # The database is the one in the URI path (or --database). Reads are free; writes
+  # (insert/update/delete, and any aggregate with $out/$merge) need --allow-write;
+  # drop/createIndex and server-side JS ($where/$function/$accumulator) are refused.
+  docs:
+    adapter: mongo
+    description: document store
+    dsn: mongodb://app_ro@10.0.0.4:27017/shop   # db "shop"; password injected
+    credential: db.docs.password
+    # ssh:                                       # optional bastion (same shape as mysql)
+    #   host: bastion.example.com
+    #   user: deploy
+    #   identity_file: ~/.ssh/id_ed25519
+
+  # dataease: LAST RESORT — a read-only HTTP bypass for when a DB can't be reached
+  # directly but its DataEase web service can. No direct connection, no writes, no
+  # databases/tables/describe; SQL is sent to DataEase's sqlPreview. Prefer a real
+  # driver whenever the network allows. See adapters/db/dataease/README.md.
+  # de:
+  #   adapter: dataease
+  #   description: bypass via DataEase (last resort)
+  #   base_url: https://dataease.example.com        # required; trailing / trimmed
+  #   data_source_id: <datasource-uuid>             # required (the DataEase datasource id)
+  #   session: dataease.de.session                  # optional; default dataease.<target>.session
+  #   login_credential: dataease.de.login           # optional; auto-login on expiry. Several
+  #                                                 # DataEase targets may share ONE login_credential.
+  #   timeout_seconds: 30                            # optional; default 30
+  #   # login_credential file (~/.aidev-clis/credentials/dataease.de.login, 0600):
+  #   #   {"username":"<pre-encrypted>","password":"<pre-encrypted>","loginType":0}

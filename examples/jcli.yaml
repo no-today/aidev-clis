@@ -1,0 +1,48 @@
+# Copy to ~/.aidev-clis/jcli.yaml and edit. `jcli <verb> --target <name> <service>`.
+# Verbs: targets / build / deploy / status / log / cancel / jobs / params / doctor.
+# Shell completion (--target / --group / <service>) ships with jcli.
+default_target: uat
+
+targets:
+  uat:
+    adapter: jenkins                   # required by the target loader
+    base_url: https://jenkins.example.com
+    credential: jenkins.uat            # credential NAME → credentials/jenkins.uat (0600); {"user","api_token"} JSON
+    # scene: companyA                  # optional: tag for `aidev` discovery; omit => global. See examples/.aidev.yaml
+    # insecure_skip_verify: true       # internal Jenkins with self-signed TLS
+    # ca_cert: /etc/ssl/corp-ca.pem    # OR pin a private CA
+
+    # groups (required): one connection, one or more stacks.
+    # `jcli <verb> [--group <name>] <service>`  (--group optional iff exactly one group)
+    groups:
+      frontend:
+        job_template: "front-end/grp/${service}"   # service → job name (catch-all)
+        # job_templates:                            # longest service-prefix wins — real configs
+        #   "team-a-": "front-end/team-a/${service}" # often have several prefix → folder rules
+        #   "team-b-": "front-end/team-b/${service}"
+
+        # deploy flow: `jcli deploy <service>` = build → wait → extract → steps.
+        # Tokens are ${...} (literal { } pass through; $$ = a literal $ for bash steps).
+        # deploy:
+        #   params: { branch: "${branch}" }                   # POSTed to the build (+ --param)
+        #   extract:                                           # name → regex over console (last capture)
+        #     tag: 'registry/uat/${service}:(\d{14})'
+        #   steps:                                             # optional; argv arrays, no shell
+        #     - [kubectl, --kubeconfig, "${vars.kubeconfig}", -n, uat,
+        #        set, image, "deploy/${service}", "${service}=registry/uat/${service}:${tag}"]
+        #     - [kubectl, --kubeconfig, "${vars.kubeconfig}", -n, uat,
+        #        rollout, status, "deploy/${service}", --timeout=5m]
+        #     # pass this build's archived artifact filename to a downstream deploy job.
+        #     # NB: jcli is NOT in the default allowlist (kubectl/ssh/helm/docker/bash),
+        #     # so a jcli step needs step_binaries below to include it:
+        #     - [jcli, build, --job, "front-end/ansible-deploy", --wait,
+        #        --param, "artifact=${artifacts.0}"]
+        #   step_binaries: [kubectl, ssh, helm, docker, bash, jcli]   # allowlist (add jcli for the step above)
+        #   # step_env: { KUBECONFIG: "${vars.kubeconfig}" }      # env for tools that read env
+        # vars: { kubeconfig: ~/.kube/uat.yaml }              # template values (~ expanded); not auto-env
+
+      backend:
+        job_template: "app-server/basic/${service}"
+        # deploy:
+        #   steps:
+        #     - [kubectl, rollout, status, "deploy/${service}"]

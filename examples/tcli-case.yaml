@@ -1,0 +1,143 @@
+# Example tcli case. `tcli {run|validate|explain} <case-or-dir>`.
+# A post-deploy verification gate: tcli orchestrates apicli/dbcli/logcli as
+# subprocesses (it never imports them) and asserts an API -> DB (-> log) chain.
+# Edit the alias->target mappings below to match your ~/.aidev-clis configs.
+# This file exercises most features; real cases are usually much smaller.
+name: order service post-deploy gate
+tags: [smoke, orders]
+
+# Declare every capability up front (see at a glance what the case touches).
+# Steps reference one by `target: <alias>`. When a section has exactly ONE entry,
+# its steps may omit `target`.
+apps:                              # api: alias -> identity ( app: defaults to the alias )
+  buyer: { app: orders,  actor: qa }
+  admin: { app: billing, actor: qa_admin }
+dbs:                               # db: alias -> dbcli target (any driver)
+  main:  orders_mysql
+  cache: orders_redis
+  docs:  orders_mongo
+logs:                              # log: alias -> logcli target
+  svc:   orders_logs
+
+vars:
+  customer: "C-1001"               # available everywhere as {{customer}}
+  # built-ins always present: {{run_id}} (unique per run), {{uuid}}, {{now}}
+
+safety:
+  allow_db_write: false            # write SQL refused unless this is true AND step.write
+
+# setup: runs first; on failure the case stops (cleanup still runs).
+setup:
+  - name: baseline row count
+    db:
+      target: main
+      sql: "SELECT count(*) AS n FROM orders WHERE customer = '{{customer}}'"
+      expect: [ "count == 1" ]
+      capture: { baseline: rows.0.0 }     # capture for a later cross-phase check
+
+# steps: the main flow; stops at the first failure (skips assertions, runs cleanup).
+steps:
+  - name: create order (raw request block; builtin {{run_id}} used in a header)
+    api:
+      target: buyer
+      request: |
+        POST /api/v1/orders
+        Content-Type: application/json
+        X-Run-Id: {{run_id}}
+
+        {"customer":"{{customer}}"}
+      expect:
+        - status_code == 200             # paths are response-relative (no data. prefix)
+        - body.code == 0
+        - body.data.id exists
+      capture: { id: body.data.id }
+      # tcli auto-captures apicli's data.trace_id into {{trace_id}} when the app
+      # configures a trace_field (handy for the trace step below).
+      wait: { timeout: 30s, interval: 2s }
+
+  - name: cross-app reachability (billing, its own actor)
+    api:
+      target: admin
+      request: |
+        GET /api/v1/health
+      expect: [ "status_code == 200" ]
+
+  - name: verify the write in mysql (SQL)
+    db:
+      target: main
+      sql: "SELECT status FROM orders WHERE id = '{{id}}'"
+      expect:
+        - count == 1
+        - rows.0.0 == confirmed
+        - rows.0.0 != cancelled
+      capture: { db_status: rows.0.0 }
+      wait: { timeout: 20s, interval: 2s }   # tolerate eventual consistency
+
+  - name: verify the cache entry in redis (redis command)
+    db:
+      target: cache
+      sql: "GET order:{{id}}:status"
+      expect: [ "rows.0.0 == confirmed" ]    # redis scalar -> {columns:[value], rows:[[...]]}
+
+  - name: verify the document in mongo (mongosh statement)
+    db:
+      target: docs
+      sql: 'db.orders.find({_id:"{{id}}"})'
+      expect:
+        - count >= 1                          # mongo find -> document array; count counts docs
+        - 0.status == confirmed               # docs addressed by index: <n>.<field>
+
+  - name: re-read baseline for a cross-phase stability check
+    db:
+      target: main
+      sql: "SELECT count(*) AS n FROM orders WHERE customer = '{{customer}}'"
+      capture: { count_now: rows.0.0 }
+
+  - name: find the request in logs, capture a correlation id
+    log:
+      target: svc
+      query: "{{id}}"                          # sls: server-side search; non-sls: client-side grep
+      from: 15m
+      size: 50
+      expect: [ "count >= 1" ]
+      capture: { corr: 0.traceId }
+
+  - name: correlate that id across services (sls trace verb)
+    log:
+      target: svc
+      trace: "{{corr}}"                        # empty/undefined -> step SKIPPED (never gates the run)
+      from: 15m
+      expect: [ "count >= 1" ]
+
+  - name: download an export and assert it with a script
+    api:
+      target: buyer
+      request: |
+        GET /api/v1/orders/{{id}}/export.xlsx
+      save_body: /tmp/order-export.xlsx        # streams body to file (no body to assert on)
+      expect: [ "status_code == 200" ]
+      assert_script:                           # exit 0 = pass; non-zero = step FAILED
+        command: sh
+        args: ["-c", "test -s /tmp/order-export.xlsx"]
+        timeout: 15s
+
+# assertions: standalone checks over captured vars (each is a {{}}-templated expression).
+assertions:
+  - name: API outcome matches DB evidence
+    expect: [ "{{db_status}} == confirmed" ]
+  - name: order metric stable across the run
+    expect: [ "{{count_now}} == {{baseline}}" ]
+  - name: a correlation id was captured
+    expect: [ "{{corr}} exists" ]
+
+# cleanup: always runs, best-effort; failures don't change the verdict, and a step
+# whose template vars are unset is skipped rather than erroring.
+cleanup:
+  - name: connectivity probe, read-only and always safe
+    db:
+      target: main
+      sql: "SELECT 1"
+  # To clean up data you wrote, add a write step AND set safety.allow_db_write: true above.
+  # tcli refuses write SQL otherwise (SAFETY_BLOCKED); dbcli enforces it again independently:
+  #   - name: remove the test order
+  #     db: { target: main, sql: "DELETE FROM orders WHERE id='{{id}}'", write: true }

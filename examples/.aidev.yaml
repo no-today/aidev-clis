@@ -1,0 +1,10 @@
+# Copy to a project root to scope `aidev` discovery to one scene. Optional — with
+# no marker (and no AIDEV_SCENE), every configured target/app is in scope.
+#
+# How scenes work: tag targets/apps with `scene: <name>` in the per-tool configs
+# (dbcli/jcli/logcli targets, apicli apps). `aidev` joins targets by NAME across tools,
+# so tagging the SAME target name with the SAME scene in several tools makes one
+# cross-CLI target whose capability = those tools (e.g. `a-uat` tagged
+# `companyA` in dbcli+jcli+logcli => a full-capability target under scene companyA).
+# An untagged target/app is global (in scope for every scene). See docs/cli-aidev.md.
+scene: companyA

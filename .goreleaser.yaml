@@ -1,0 +1,93 @@
+# Release pipeline: one archive per platform carrying ALL binaries under bin/
+# plus skills/, examples/, and the install scripts — an install is binaries + agent skills
+# + completions, so the archive must ship everything install.sh needs to run
+# in prebuilt mode (it detects the missing go.mod and skips `go build`).
+# Validate: go run github.com/goreleaser/goreleaser/v2@latest check
+# Dry run:  go run github.com/goreleaser/goreleaser/v2@latest release --snapshot --clean
+version: 2
+project_name: aidev-clis
+
+builds:
+  - id: apicli
+    main: ./cmd/apicli
+    binary: bin/apicli
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/no-today/aidev-clis/internal/core/buildinfo.Version={{.Version}}+{{.ShortCommit}}
+  - id: dbcli
+    main: ./cmd/dbcli
+    binary: bin/dbcli
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/no-today/aidev-clis/internal/core/buildinfo.Version={{.Version}}+{{.ShortCommit}}
+  - id: jcli
+    main: ./cmd/jcli
+    binary: bin/jcli
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/no-today/aidev-clis/internal/core/buildinfo.Version={{.Version}}+{{.ShortCommit}}
+  - id: logcli
+    main: ./cmd/logcli
+    binary: bin/logcli
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/no-today/aidev-clis/internal/core/buildinfo.Version={{.Version}}+{{.ShortCommit}}
+  - id: tcli
+    main: ./cmd/tcli
+    binary: bin/tcli
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/no-today/aidev-clis/internal/core/buildinfo.Version={{.Version}}+{{.ShortCommit}}
+  - id: aidev
+    main: ./cmd/aidev
+    binary: bin/aidev
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/no-today/aidev-clis/internal/core/buildinfo.Version={{.Version}}+{{.ShortCommit}}
+
+archives:
+  - id: aidev-clis
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    wrap_in_directory: true
+    files:
+      - README.md
+      - skills/**
+      - examples/**        # install scripts copy the matching example(s) into each installed skill dir
+      - scripts/install.sh
+      - scripts/install.ps1
+      - scripts/uninstall.sh
+      - scripts/uninstall.ps1
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude: ["^docs", "^test", "^chore", "^ci"]
+
+release:
+  # Tags with a prerelease suffix (v2026.7.3-pre) are marked Pre-release on
+  # GitHub automatically; the repo currently publishes ONLY prereleases (the
+  # get.sh/get.ps1 latest-fallback depends on nothing being "latest-stable").
+  # mode replace lets a re-pushed tag replace the existing release's assets
+  # (rolling-release pattern). NOTE: tags must be valid semver — date-style
+  # v2026.7.3-pre is; bare v2026-pre is not.
+  prerelease: auto
+  mode: replace

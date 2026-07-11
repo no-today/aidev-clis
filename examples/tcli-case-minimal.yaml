@@ -1,0 +1,26 @@
+# Minimal tcli case — the API→DB happy path. Run: `tcli run tcli-case-minimal.yaml`.
+# Single app + single db, so steps omit `target:`. For the fully-commented schema
+# (setup/cleanup, logs, trace, assertions, script asserts, safety) see the sibling
+# tcli-case.yaml.
+name: order smoke gate
+tags: [smoke]
+
+apps: { buyer: { app: orders, actor: qa } }   # api alias -> app + actor (from actors.yaml)
+dbs:  { main: orders_mysql }                    # db alias -> dbcli target
+
+steps:
+  - name: create order
+    api:
+      request: |
+        POST /api/v1/orders
+        Content-Type: application/json
+
+        {"customer":"C-1001"}
+      expect: [ "status_code == 200", "body.code == 0", "body.data.id exists" ]  # paths are response-relative
+      capture: { id: body.data.id }
+
+  - name: verify it landed in the db
+    db:
+      sql: "SELECT status FROM orders WHERE id = '{{id}}'"
+      expect: [ "count == 1", "rows.0.0 == confirmed" ]
+      wait: { timeout: 20s, interval: 2s }      # tolerate eventual consistency

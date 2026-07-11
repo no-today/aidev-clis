@@ -1,0 +1,21 @@
+/bin/
+/dist/
+*.out
+.DS_Store
+.idea/
+
+# stray audit logs from running CLIs against examples/
+audit.jsonl
+
+# built CLI binaries (from `go build ./cmd/...` in repo root)
+/jcli
+/dbcli
+/logcli
+/apicli
+
+# local-only: design docs, plans, and code reviews (kept on disk, never committed)
+/docs/reviews/
+/docs/superpowers/
+
+# superpowers workflow scratch
+/.superpowers/

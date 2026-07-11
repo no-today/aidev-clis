@@ -1,0 +1,86 @@
+# Copy to ~/.aidev-clis/apicli.yaml and edit. `apicli {call|login|whoami|logout} <app> [path]`.
+# The verb leads; <app> is its first positional. Accounts live in actors.yaml
+# (see examples/actors.yaml). apicli addresses apps — there is no global --env.
+apps:
+
+  # An app that needs a scripted login (token captured from the response, then
+  # injected as a bearer header on every call). The most common shape.
+  svc-login:
+    # scene: companyA   # optional: tag for `aidev` discovery; omit => global. See examples/.aidev.yaml
+    base_url: http://uat.example.com        # default env
+    # insecure_skip_verify: true             # internal HTTPS with a self-signed cert
+    # ca_cert: /etc/ssl/corp-ca.pem          # OR pin a private CA (PEM bundle)
+    envs:                                     # named base-URL overrides: --env pre / --env prod
+      pre:  http://pre.example.com
+      prod: https://prod.example.com
+    default_actor: alice                       # used when --actor is omitted (key in actors.yaml)
+    auth:
+      kind: flow                        # flow | none  (cookie replay is per-step, not a kind)
+      vars_required: [phoneNo, password]      # must be present on the actor for auto-relogin
+      flow:                                   # raw-HTTP request templates; {{vars}} from the actor
+        - request: |
+            POST /auth/login
+            Content-Type: application/json
+
+            {"phoneNo":"{{phoneNo}}","password":"{{password}}"}
+          assert: "body.code == 0"            # optional: false → login fails AUTH_FAILED
+          capture:                            # var → gjson path over the response body
+            token: body.data.token
+      inject:
+        header: "Authorization: Bearer {{token}}"   # rides on every call
+        # cookie: "SESSION={{token}}"               # OR inject a cookie instead
+    response:                                 # these apps often return 200 + body.code, so:
+      ok_when:      "body.code == 0"          # business success → ok flag + exit 0
+      expired_when: "body.code == 401"        # session dead → auto re-login once + retry
+
+  # An app that needs no login at all (open/internal). Just a base URL + how to
+  # read success. Calls go straight through.
+  svc-open:
+    base_url: https://svc-open-uat.example.com
+    auth: { kind: none }
+    response:
+      ok_when:      "status == 200"
+      expired_when: "status == 401 || body.status == 'NOT_LOGIN'"
+
+  # A legacy app showing the full flow fidelity: constant headers, static
+  # defaults, a multi-step flow with cross-step captures + per-step asserts,
+  # cookie replay, and MULTI-header inject. Trace pivot wired via trace_field.
+  svc-legacy:
+    base_url: https://legacy-uat.example.com
+    default_actor: ops
+    extra_headers:                            # constant on EVERY call (a per-call -H overrides)
+      Client-Id: my-web-client                # a fixed client id your gateway expects
+    trace_field: header.X-Trace-Id            # emitted as data.trace_id (canonical header casing)
+    log_env: log_uat                          # appended to the failed-call trace hint
+    auth:
+      kind: flow
+      vars_defaults: { terminalType: "3" }    # lowest precedence: vars_defaults < actor/--var < captured
+      vars_required: [username, password]
+      flow:
+        - name: get-token                     # optional; named in a failed-assert error
+          request: |
+            POST /auth/getAccessToken
+            Content-Type: application/json
+
+            {"username":"{{username}}","password":"{{password}}"}
+          assert: "status == 200"
+          cookie_from_set_cookie: true        # replay this step's Set-Cookie thereafter.
+          # If the session is ONLY a cookie (login returns no token), stop here:
+          # omit `capture` and the whole `inject:` block — the cookie jar rides
+          # automatically on every call (pure cookie-replay).
+          capture:
+            token: body.data.accessToken
+        - name: verify-login                  # step 2 sees {{token}} captured above (cross-step)
+          request: |
+            POST /auth/verify
+            Authorization: Bearer {{token}}
+
+            {}
+          assert: "status == 200"
+      inject:
+        headers:                              # all injected on every call, rendered from session vars
+          Authorization: "Bearer {{token}}"
+          Access-Token: "{{token}}"
+    response:
+      ok_when:      "status == 200"
+      expired_when: "status == 401"

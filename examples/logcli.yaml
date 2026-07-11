@@ -1,0 +1,57 @@
+# Copy to ~/.aidev-clis/logcli.yaml and edit. `logcli <adapter> --target <name> ...`;
+# the target block's `adapter` picks the adapter (must match the subcommand you run).
+# In practice most targets are Aliyun SLS (one logstore per target, many targets sharing
+# one AK); the file/kubectl/ssh adapters are here for hosts you reach directly.
+default_target: uat
+
+targets:
+  # ── sls: Aliyun SLS GetLogs OpenAPI (AK/SK signature). The common case — one
+  # logstore per target. Verbs: search / trace (batch), tail (stream NDJSON), doctor.
+  # No `ls` (the logstore is fixed here). The RAM policy on the AK is the real
+  # boundary — grant only log:GetLogStoreLogs.
+  uat:
+    adapter: sls
+    description: UAT cluster logs
+    endpoint: cn-hangzhou.log.aliyuncs.com    # bare region host, NOT a console URL
+    project: k8s-log-uat
+    logstore: app-uat-log
+    credential: sls.ak                         # credential NAME → credentials/sls.ak (0600); AK/SK JSON
+    trace_field: traceId                       # the field `logcli trace` pivots on (request id)
+    # scene: companyA                          # optional: tag for `aidev` discovery; omit => global. See examples/.aidev.yaml
+  # A second logstore in a DIFFERENT region — only the endpoint host changes, and
+  # the same AK is reused across targets (one AK, many targets).
+  tenant-a:
+    adapter: sls
+    description: tenant A (Shenzhen region)
+    endpoint: cn-shenzhen.log.aliyuncs.com     # region differs from `uat` above
+    project: k8s-log-tenant-a
+    logstore: tenant-a-prod-log
+    credential: sls.ak                         # same AK as `uat`
+    trace_field: traceId
+
+  # ── local-file: tails ONLY the configured files (an allow-list). `ls` lists
+  # them; `logs` tails the last --tail N (default 200), `logs -f` follows
+  # appended lines. Go-native (works on Windows too).
+  local:
+    adapter: local-file
+    files: [/var/log/app.log, /var/log/app.err.log]
+
+  # ── kubectl: `logs` pass-through + `ls` (lists deployments). Inject a logs-only
+  # ServiceAccount kubeconfig as the credential — that scoped kubeconfig is the
+  # real boundary; the allowlist is defense-in-depth.
+  uat_k8s:
+    adapter: kubectl
+    description: UAT cluster
+    kubeconfig_credential: k8s.uat   # credential NAME → credentials/k8s.uat (0600); a kubeconfig (contents are YAML, suffix irrelevant)
+    namespace: uat
+
+  # ── ssh-file: tails ONLY the configured files over the system ssh, key-only
+  # (BatchMode). `logs` (batch) / `logs -f` (follow). The `ssh-docker` adapter is
+  # the same transport but runs `docker logs` / `docker ps` (ls) on the remote
+  # host; and `docker` is the local-socket version of that.
+  app_ssh:
+    adapter: ssh-file
+    host: vps.example.com
+    user: deploy
+    identity_file: ~/.ssh/id_ed25519
+    files: [/srv/app/app.log, /srv/app/err.log]
