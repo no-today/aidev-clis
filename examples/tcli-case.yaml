@@ -50,6 +50,10 @@ steps:
         - status_code == 200             # paths are response-relative (no data. prefix)
         - body.code == 0
         - body.data.id exists
+        - body.data.id is string         # type contract: snowflake id stays a string (== is value-only, blind to this)
+        - 'body.data.createdAt matches "^\d{4}-\d{2}-\d{2}"'   # format assertion (RE2, unanchored — write ^...$ yourself)
+        - body.data.idCardNo not exists  # desensitization: field must be absent
+        - body not contains 13333333333  # ...and the plaintext appears nowhere in the WHOLE serialized body (survives field moves)
       capture: { id: body.data.id }
       # tcli auto-captures apicli's data.trace_id into {{trace_id}} when the app
       # configures a trace_field (handy for the trace step below).
