@@ -24,6 +24,7 @@ func TestParseExpr_AllOperators(t *testing.T) {
 		{"count < 5", "<", "count", "5"},
 		{"message contains error", "contains", "message", "error"},
 		{"body.id exists", "exists", "body.id", ""},
+		{"body.data.secret not exists", "not exists", "body.data.secret", ""},
 	}
 	for _, tc := range cases {
 		e, err := ParseExpr(tc.in)
@@ -37,7 +38,7 @@ func TestParseExpr_AllOperators(t *testing.T) {
 		if e.LHS != tc.lhs {
 			t.Errorf("%q: lhs=%q want %q", tc.in, e.LHS, tc.lhs)
 		}
-		if tc.op != "exists" && e.RHS != tc.rhs {
+		if tc.op != "exists" && tc.op != "not exists" && e.RHS != tc.rhs {
 			t.Errorf("%q: rhs=%q want %q", tc.in, e.RHS, tc.rhs)
 		}
 	}
@@ -127,6 +128,37 @@ func TestEvalExprs_Exists(t *testing.T) {
 func TestEvalExprs_ExistsMissing(t *testing.T) {
 	if err := EvalExprs(samplePayload, []string{"body.nonexistent exists"}, "", nil); err == nil {
 		t.Fatal("exists should fail when path absent")
+	}
+}
+
+func TestEvalExprs_NotExists(t *testing.T) {
+	// "not exists" should PASS when path is missing
+	if err := EvalExprs(samplePayload, []string{"body.nonexistent not exists"}, "", nil); err != nil {
+		t.Fatalf("not exists should pass when path missing: %v", err)
+	}
+}
+
+func TestEvalExprs_NotExistsPresent(t *testing.T) {
+	// "not exists" should FAIL when path is present with non-empty value
+	if err := EvalExprs(samplePayload, []string{"body.id not exists"}, "", nil); err == nil {
+		t.Fatal("not exists should fail when path present with non-empty value")
+	}
+}
+
+func TestEvalExprs_NotExistsEmpty(t *testing.T) {
+	// "not exists" should PASS when path is present but empty
+	payload := []byte(`{"body":{"id":"","msg":"test"}}`)
+	if err := EvalExprs(payload, []string{"body.id not exists"}, "", nil); err != nil {
+		t.Fatalf("not exists should pass when path present but empty: %v", err)
+	}
+}
+
+func TestEvalExprs_NotExistsNull(t *testing.T) {
+	// "not exists" should PASS when path is present with null value
+	// (gjson null becomes "" string)
+	payload := []byte(`{"body":{"id":null,"msg":"test"}}`)
+	if err := EvalExprs(payload, []string{"body.id not exists"}, "", nil); err != nil {
+		t.Fatalf("not exists should pass when path is null: %v", err)
 	}
 }
 
@@ -223,6 +255,34 @@ func TestEvalExprs_Standalone_MissingVar(t *testing.T) {
 	err := EvalExprs(nil, []string{"{{undefined}} == x"}, "", map[string]string{})
 	if err == nil {
 		t.Fatal("expected error for undefined template var")
+	}
+}
+
+func TestEvalExprs_Standalone_NotExistsEmpty(t *testing.T) {
+	// Standalone mode: "not exists" PASSES when rendered lhs is empty/whitespace
+	if err := EvalExprs(nil, []string{"  not exists"}, "", nil); err != nil {
+		t.Fatalf("standalone not exists should pass for empty lhs: %v", err)
+	}
+}
+
+func TestEvalExprs_Standalone_NotExistsNonEmpty(t *testing.T) {
+	// Standalone mode: "not exists" FAILS when rendered lhs is non-empty
+	if err := EvalExprs(nil, []string{"hello not exists"}, "", nil); err == nil {
+		t.Fatal("standalone not exists should fail for non-empty lhs")
+	}
+}
+
+func TestEvalExprs_Standalone_NotExistsTemplated(t *testing.T) {
+	// Standalone mode with template variables
+	vars := map[string]string{"status": "active"}
+	// Templated to "active" -> non-empty -> should fail
+	if err := EvalExprs(nil, []string{"{{status}} not exists"}, "", vars); err == nil {
+		t.Fatal("standalone not exists should fail for non-empty templated lhs")
+	}
+	// Templated to empty string -> should pass
+	varsEmpty := map[string]string{"status": ""}
+	if err := EvalExprs(nil, []string{"{{status}} not exists"}, "", varsEmpty); err != nil {
+		t.Fatalf("standalone not exists should pass for empty templated lhs: %v", err)
 	}
 }
 

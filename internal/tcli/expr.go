@@ -9,10 +9,10 @@ import (
 	"github.com/no-today/aidev-clis/internal/core/errs"
 )
 
-// Expr is a parsed assertion: `<lhs> <op> <rhs>` (or `<lhs> exists`).
+// Expr is a parsed assertion: `<lhs> <op> <rhs>` (or `<lhs> exists`/`<lhs> not exists`).
 type Expr struct {
 	LHS string
-	Op  string // == | != | contains | exists | >= | > | <= | <
+	Op  string // == | != | contains | exists | not exists | >= | > | <= | <
 	RHS string
 }
 
@@ -57,6 +57,9 @@ func ParseExpr(s string) (Expr, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return Expr{}, errs.Config("EXPECT_INVALID", "empty expression")
+	}
+	if strings.HasSuffix(s, " not exists") {
+		return Expr{LHS: strings.TrimSpace(strings.TrimSuffix(s, " not exists")), Op: "not exists"}, nil
 	}
 	if strings.HasSuffix(s, " exists") {
 		return Expr{LHS: strings.TrimSpace(strings.TrimSuffix(s, " exists")), Op: "exists"}, nil
@@ -119,6 +122,11 @@ func evalOne(payload []byte, e Expr, collPath string) error {
 	case "exists":
 		if !exists || strings.TrimSpace(actual) == "" {
 			return errs.General("EXPECT_FAILED", e.LHS+" exists (missing/empty)")
+		}
+		return nil
+	case "not exists":
+		if exists && strings.TrimSpace(actual) != "" {
+			return errs.General("EXPECT_FAILED", e.LHS+" not exists (present: "+actual+")")
 		}
 		return nil
 	case "==":

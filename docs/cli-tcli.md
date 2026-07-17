@@ -127,6 +127,7 @@ expressions. There are no assertion "keys" to memorize — just `<lhs> <op> <rhs
 | `path != v` | not equal |
 | `path contains v` | substring (quote values with spaces: `contains "order created"`) |
 | `path exists` | present and non-empty (no rhs) |
+| `path not exists` | missing or empty (exact negation of exists; no rhs) |
 | `path >= n` (`>` `<=` `<`) | numeric comparison |
 | `count >= n` (`==` …) | length of the step's result collection |
 

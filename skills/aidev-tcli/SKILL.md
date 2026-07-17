@@ -132,7 +132,7 @@ target's driver statement (SQL, a redis command, or a mongosh statement).
 
 Every step (and standalone assertion) carries `expect:`, a list of `<lhs> <op>
 <rhs>` expressions — no assertion "keys" to memorize. Operators: `==` `!=`
-`contains` `exists` (no rhs) `>=` `>` `<=` `<`, and `count <op> n` (collection
+`contains` `exists` (no rhs) `not exists` (no rhs) `>=` `>` `<=` `<`, and `count <op> n` (collection
 length).
 
 - `path` is **result-relative** (NO `data.` prefix): api → `status_code`,
