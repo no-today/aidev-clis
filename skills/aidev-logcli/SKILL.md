@@ -71,6 +71,9 @@ before querying.
   `--target` silently uses the default target — the envelope warns when this
   happens; treat that warning as a bug in your invocation. The legacy `--env` flag
   errors with `LEGACY_FLAG` (renamed to `--target`).
+- Log lines are a PII exit: mask real PII (id numbers, phones, card numbers,
+  names) before quoting a log snippet into docs, tests, or persistent notes —
+  full rules in the **aidev-dbcli** skill.
 
 ## Bounded vs live — pick deliberately
 

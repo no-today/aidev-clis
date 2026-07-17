@@ -40,6 +40,9 @@ aidev
 
 A tool missing from `tools` is not configured in this scene — don't use it here.
 
+These CLIs surface real data: real PII in any result never goes into seed data,
+tests, docs, or persistent notes (full rules: the **aidev-dbcli** skill).
+
 A sample scene marker, `.aidev.yaml`, is bundled alongside this skill — drop it at
 a project root to scope discovery to one scene.
 

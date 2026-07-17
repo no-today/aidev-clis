@@ -173,6 +173,9 @@ result paths only) `exists` (no rhs) `not exists` (no rhs) `>=` `>` `<=` `<`, an
   same case FAIL→PASS on identical reruns. Assert relations that survive drift —
   set-equivalence between two queries, `count >= n`, field presence — and pin
   absolutes only on data the case itself created (via `{{run_id}}`).
+- **PII:** seed and expect values are always fake-but-format-valid or surrogate
+  keys — never real PII copied from a live system (full rules: the
+  **aidev-dbcli** skill).
 
 ## Output contract (parse this)
 

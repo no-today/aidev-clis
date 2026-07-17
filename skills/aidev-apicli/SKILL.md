@@ -100,6 +100,10 @@ config · `3` auth / SESSION_EXPIRED · `4` timeout · `5` remote/transport.
 The default JSON envelope is already what an agent wants — **don't pass `--output`**.
 (`--output raw` returns the bare body text, and `--pretty` indents — both for humans.)
 
+Response bodies are a PII exit: mask real PII (id numbers, phones, card numbers,
+names) before quoting a response snippet into docs, tests, or persistent notes —
+full rules in the **aidev-dbcli** skill.
+
 ## call flags
 
 | flag | short | default | description |

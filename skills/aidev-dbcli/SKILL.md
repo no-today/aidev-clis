@@ -84,6 +84,19 @@ copying data between targets or seeding. The table is inferred from the query's
 `FROM` (override with `--table`; `INSERT_NO_TABLE` if neither resolves). Literals
 are quoted per the driver's dialect. SQL family only — `redis`/`mongo` reject it.
 
+## PII hygiene — query results are not seed data
+
+Real PII in query results (national ID numbers, phone numbers, bank/card
+numbers, names) must never be copied into seed data, test cases, documentation,
+or persistent notes/memory — it stays in the conversation.
+
+- Refer to a person/account by a semantics-free surrogate key (auto-increment
+  PK, internal id), never by an identity/document number.
+- Seed and test data: generate format-valid but obviously fake values; never
+  reuse values queried from a real database (`insert` output included).
+- Filtering on a PII value the user supplied (`WHERE id_no = ...`) is fine —
+  pass it through; don't SELECT PII out first and spread it further.
+
 ## Namespace model (`database` = the qualifier namespace)
 
 dbcli presents ONE namespace level called `database`:
