@@ -1,6 +1,7 @@
 package tcli
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -12,14 +13,19 @@ import (
 // Expr is a parsed assertion: `<lhs> <op> <rhs>` (or `<lhs> exists`/`<lhs> not exists`).
 type Expr struct {
 	LHS string
-	Op  string // == | != | contains | exists | not exists | >= | > | <= | <
+	Op  string // == | != | contains | not contains | matches | is | exists | not exists | >= | > | <= | <
 	RHS string
 }
 
-// exprOps are matched longest-first at a position (so " >= " wins over " > ",
-// and " contains " is not shadowed by a comparison op that appears later in a
-// quoted value). Spaces are required around the operator.
-var exprOps = []string{" contains ", " != ", " == ", " >= ", " <= ", " > ", " < "}
+// exprOps are matched longest-first at a position (so " not contains " wins
+// over " contains ", " >= " wins over " > ", and " contains " is not shadowed
+// by a comparison op that appears later in a quoted value). " is " is last:
+// it is short and must not shadow/steal from longer ops. Spaces are required
+// around the operator.
+var exprOps = []string{" not contains ", " contains ", " matches ", " != ", " == ", " >= ", " <= ", " > ", " < ", " is "}
+
+// isTypes is the closed set of valid RHS values for the `is` operator.
+var isTypes = map[string]bool{"string": true, "number": true, "bool": true, "array": true, "object": true, "null": true}
 
 // findOp returns the index + operator of the LEFTMOST operator occurring OUTSIDE
 // any quoted region — so `0.message contains "a == b"` splits on contains, not on
@@ -65,11 +71,22 @@ func ParseExpr(s string) (Expr, error) {
 		return Expr{LHS: strings.TrimSpace(strings.TrimSuffix(s, " exists")), Op: "exists"}, nil
 	}
 	if i, op := findOp(s); i >= 0 {
-		return Expr{
+		e := Expr{
 			LHS: strings.TrimSpace(s[:i]),
 			Op:  strings.TrimSpace(op),
 			RHS: strings.TrimSpace(s[i+len(op):]),
-		}, nil
+		}
+		switch e.Op {
+		case "matches":
+			if _, err := regexp.Compile(unquote(e.RHS)); err != nil {
+				return Expr{}, errs.Config("EXPECT_INVALID", "matches: invalid regex "+e.RHS+": "+err.Error())
+			}
+		case "is":
+			if !isTypes[e.RHS] {
+				return Expr{}, errs.Config("EXPECT_INVALID", "is: type must be one of string|number|bool|array|object|null, got "+e.RHS)
+			}
+		}
+		return e, nil
 	}
 	return Expr{}, errs.Config("EXPECT_INVALID", "cannot parse expression: "+s)
 }
@@ -109,8 +126,9 @@ func evalOne(payload []byte, e Expr, collPath string) error {
 
 	var actual string
 	var exists bool
+	var r gjson.Result // zero value when payload == nil; only `is` needs the type
 	if payload != nil {
-		r := gjson.GetBytes(payload, e.LHS)
+		r = gjson.GetBytes(payload, e.LHS)
 		exists, actual = r.Exists(), r.String()
 	} else {
 		// standalone: lhs is already a rendered literal.
@@ -139,6 +157,48 @@ func evalOne(payload []byte, e Expr, collPath string) error {
 		}
 	case "contains":
 		if !strings.Contains(actual, unquote(e.RHS)) {
+			return fail(actual)
+		}
+	case "not contains":
+		// exact negation of contains. A missing path (actual "") passes
+		// vacuously: "this value must not appear" holds. On an object/array
+		// path, actual is the raw JSON serialization, so `body not contains x`
+		// asserts x appears nowhere in the serialized body.
+		if strings.Contains(actual, unquote(e.RHS)) {
+			return fail(actual)
+		}
+	case "matches":
+		// Go regexp (RE2), unanchored partial match — anchor with ^...$ yourself.
+		re, err := regexp.Compile(unquote(e.RHS))
+		if err != nil {
+			return errs.Config("EXPECT_INVALID", "matches: invalid regex "+e.RHS+": "+err.Error())
+		}
+		if !re.MatchString(actual) {
+			return fail(actual)
+		}
+	case "is":
+		if payload == nil {
+			return errs.Config("EXPECT_INVALID", "is requires a result path")
+		}
+		if !exists {
+			return errs.General("EXPECT_FAILED", e.LHS+" is "+e.RHS+" (missing)")
+		}
+		ok := false
+		switch e.RHS {
+		case "string":
+			ok = r.Type == gjson.String
+		case "number":
+			ok = r.Type == gjson.Number
+		case "bool":
+			ok = r.Type == gjson.True || r.Type == gjson.False
+		case "null":
+			ok = r.Type == gjson.Null
+		case "array":
+			ok = r.IsArray()
+		case "object":
+			ok = r.IsObject()
+		}
+		if !ok {
 			return fail(actual)
 		}
 	case ">=", ">", "<=", "<":

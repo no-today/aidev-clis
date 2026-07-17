@@ -126,6 +126,9 @@ expressions. There are no assertion "keys" to memorize — just `<lhs> <op> <rhs
 | `path == v` | equal (numeric when both parse as numbers, else string) |
 | `path != v` | not equal |
 | `path contains v` | substring (quote values with spaces: `contains "order created"`) |
+| `path not contains v` | substring absent (exact negation of contains; a missing path passes vacuously). On an object/array path the value checked is the raw JSON serialization — so `body not contains <plaintext>` asserts the plaintext appears nowhere in the serialized body (desensitization check that survives field moves) |
+| `path matches re` | Go regex (RE2), unanchored partial match — write `^...$` yourself; an invalid regex fails `validate` |
+| `path is t` | JSON type assertion, `t` ∈ string \| number \| bool \| array \| object \| null (catches type regressions `==` cannot, e.g. a snowflake ID no longer serialized as a string); result paths only, not standalone assertions |
 | `path exists` | present and non-empty (no rhs) |
 | `path not exists` | missing or empty (exact negation of exists; no rhs) |
 | `path >= n` (`>` `<=` `<`) | numeric comparison |
@@ -139,6 +142,10 @@ expressions. There are no assertion "keys" to memorize — just `<lhs> <op> <rhs
 - In a standalone assertion the expression is `{{}}`-rendered first and both
   operands are literals. `{{vars}}` are rendered everywhere before evaluation.
 - A malformed expression fails `validate` (`EXPECT_INVALID`).
+- `is` gotcha: dbcli deliberately emits int64 beyond ±2^53 as a JSON string
+  (JS-precision protection), so on a `db` step a big snowflake ID is a string
+  regardless of the column type — assert ID type contracts on the `api` step,
+  where the service's own serialization reaches the expression untouched.
 
 ## capture, templating, built-ins
 

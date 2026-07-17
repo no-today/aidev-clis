@@ -132,14 +132,19 @@ target's driver statement (SQL, a redis command, or a mongosh statement).
 
 Every step (and standalone assertion) carries `expect:`, a list of `<lhs> <op>
 <rhs>` expressions — no assertion "keys" to memorize. Operators: `==` `!=`
-`contains` `exists` (no rhs) `not exists` (no rhs) `>=` `>` `<=` `<`, and `count <op> n` (collection
-length).
+`contains` `not contains` `matches` (regex) `is` (string|number|bool|array|object|null,
+result paths only) `exists` (no rhs) `not exists` (no rhs) `>=` `>` `<=` `<`, and
+`count <op> n` (collection length).
 
 - `path` is **result-relative** (NO `data.` prefix): api → `status_code`,
   `body.code`, `headers.X-Trace-Id`; db (SQL/redis) → `rows.0.0`, `columns.0`; db
   (mongo) / log → `0.field` (the document/record array root).
 - `count` is the collection length: `body` (api), `rows` (SQL/redis), the root
   array (mongo find / log).
+- Desensitization pattern: `body not contains <plaintext>` matches against the
+  whole serialized body, so it survives field moves.
+- Assert ID type contracts (`… is string`) on `api` steps, not `db` steps —
+  dbcli emits int64 beyond ±2^53 as a string by design (JS-precision guard).
 - `{{vars}}` are rendered everywhere before evaluation; a malformed expression
   fails `validate` (`EXPECT_INVALID`).
 

@@ -23,6 +23,9 @@ func TestParseExpr_AllOperators(t *testing.T) {
 		{"count <= 10", "<=", "count", "10"},
 		{"count < 5", "<", "count", "5"},
 		{"message contains error", "contains", "message", "error"},
+		{"body not contains 13333333333", "not contains", "body", "13333333333"},
+		{`body.phone matches "^1\d{10}$"`, "matches", "body.phone", `"^1\d{10}$"`},
+		{"body.data.orderNo is string", "is", "body.data.orderNo", "string"},
 		{"body.id exists", "exists", "body.id", ""},
 		{"body.data.secret not exists", "not exists", "body.data.secret", ""},
 	}
@@ -54,6 +57,53 @@ func TestParseExpr_Errors(t *testing.T) {
 	for _, b := range bad {
 		if _, err := ParseExpr(b); err == nil {
 			t.Errorf("%q: expected parse error, got none", b)
+		}
+	}
+}
+
+func TestParseExpr_MatchesInvalidRegex(t *testing.T) {
+	// a regex that does not compile is caught at parse time (EXPECT_INVALID)
+	for _, in := range []string{`x matches "("`, `x matches (`} {
+		_, err := ParseExpr(in)
+		if err == nil {
+			t.Fatalf("%q: expected EXPECT_INVALID for invalid regex, got none", in)
+		}
+		if !strings.Contains(err.Error(), "EXPECT_INVALID") {
+			t.Fatalf("%q: expected EXPECT_INVALID, got: %v", in, err)
+		}
+	}
+}
+
+func TestParseExpr_IsInvalidType(t *testing.T) {
+	// rhs of `is` must be one of string|number|bool|array|object|null
+	for _, in := range []string{"x is integer", "x is String", "x is boolean"} {
+		_, err := ParseExpr(in)
+		if err == nil {
+			t.Fatalf("%q: expected EXPECT_INVALID for unknown type, got none", in)
+		}
+		if !strings.Contains(err.Error(), "EXPECT_INVALID") {
+			t.Fatalf("%q: expected EXPECT_INVALID, got: %v", in, err)
+		}
+	}
+}
+
+func TestParseExpr_NewOpsDontStealFromExisting(t *testing.T) {
+	// adding " not contains " / " matches " / " is " must not change how existing
+	// forms parse: the leftmost operator outside quotes still wins, and quoted
+	// values containing the new op words stay protected.
+	cases := []struct{ in, op, lhs, rhs string }{
+		{`body.note == "this is fine"`, "==", "body.note", `"this is fine"`},
+		{`body.msg contains "it is done"`, "contains", "body.msg", `"it is done"`},
+		{`body.msg contains "does not contains x"`, "contains", "body.msg", `"does not contains x"`},
+		{`body.msg != "x matches y"`, "!=", "body.msg", `"x matches y"`},
+	}
+	for _, c := range cases {
+		e, err := ParseExpr(c.in)
+		if err != nil {
+			t.Fatalf("%q: parse error %v", c.in, err)
+		}
+		if e.Op != c.op || e.LHS != c.lhs || e.RHS != c.rhs {
+			t.Fatalf("%q -> {lhs:%q op:%q rhs:%q}, want {lhs:%q op:%q rhs:%q}", c.in, e.LHS, e.Op, e.RHS, c.lhs, c.op, c.rhs)
 		}
 	}
 }
@@ -159,6 +209,156 @@ func TestEvalExprs_NotExistsNull(t *testing.T) {
 	payload := []byte(`{"body":{"id":null,"msg":"test"}}`)
 	if err := EvalExprs(payload, []string{"body.id not exists"}, "", nil); err != nil {
 		t.Fatalf("not exists should pass when path is null: %v", err)
+	}
+}
+
+// ——————————————————————————————————————————
+// EvalExprs — not contains (incl. whole-body raw-JSON desensitization check)
+// ——————————————————————————————————————————
+
+func TestEvalExprs_NotContains_WholeBodyPlaintextFails(t *testing.T) {
+	// gjson String() on an object path returns the raw JSON serialization, so
+	// `body not contains <plaintext>` scans the ENTIRE serialized body — a
+	// desensitization regression check that survives field moves.
+	payload := []byte(`{"body":{"data":{"contact":{"phone":"13333333333"}}}}`)
+	if err := EvalExprs(payload, []string{"body not contains 13333333333"}, "", nil); err == nil {
+		t.Fatal("not contains must fail: plaintext phone appears in nested field of serialized body")
+	}
+}
+
+func TestEvalExprs_NotContains_WholeBodyMaskedPasses(t *testing.T) {
+	payload := []byte(`{"body":{"data":{"contact":{"phone":"133****3333"}}}}`)
+	if err := EvalExprs(payload, []string{"body not contains 13333333333"}, "", nil); err != nil {
+		t.Fatalf("not contains should pass once the value is masked: %v", err)
+	}
+}
+
+func TestEvalExprs_Contains_ObjectPathRawJSON(t *testing.T) {
+	// pins the raw-JSON String() behavior itself: a positive contains on an
+	// object path matches against the serialized JSON of that subtree.
+	payload := []byte(`{"body":{"data":{"contact":{"phone":"13333333333"}}}}`)
+	if err := EvalExprs(payload, []string{"body contains 13333333333"}, "", nil); err != nil {
+		t.Fatalf("contains on object path should match nested value in raw JSON: %v", err)
+	}
+}
+
+func TestEvalExprs_NotContains_ScalarPath(t *testing.T) {
+	if err := EvalExprs(samplePayload, []string{"body.message not contains FAILURE"}, "", nil); err != nil {
+		t.Fatalf("not contains should pass when substring absent: %v", err)
+	}
+	if err := EvalExprs(samplePayload, []string{"body.message not contains created"}, "", nil); err == nil {
+		t.Fatal("not contains should fail when substring present")
+	}
+}
+
+func TestEvalExprs_NotContains_MissingPathVacuousPass(t *testing.T) {
+	// missing path -> actual "" -> "must not appear" holds vacuously
+	if err := EvalExprs(samplePayload, []string{"body.nonexistent not contains anything"}, "", nil); err != nil {
+		t.Fatalf("not contains on missing path should pass vacuously: %v", err)
+	}
+}
+
+// ——————————————————————————————————————————
+// EvalExprs — matches (Go RE2, unanchored)
+// ——————————————————————————————————————————
+
+func TestEvalExprs_MatchesMaskedPhone(t *testing.T) {
+	payload := []byte(`{"body":{"data":{"patPhone":"133****3333"}}}`)
+	if err := EvalExprs(payload, []string{`body.data.patPhone matches "^133\*{4}3333$"`}, "", nil); err != nil {
+		t.Fatalf("matches should pass for masked phone format: %v", err)
+	}
+}
+
+func TestEvalExprs_MatchesFail(t *testing.T) {
+	payload := []byte(`{"body":{"data":{"patPhone":"13333333333"}}}`)
+	if err := EvalExprs(payload, []string{`body.data.patPhone matches "^133\*{4}3333$"`}, "", nil); err == nil {
+		t.Fatal("matches should fail when value does not match the pattern")
+	}
+}
+
+func TestEvalExprs_MatchesUnanchored(t *testing.T) {
+	// partial (unanchored) match: users anchor with ^...$ themselves
+	if err := EvalExprs(samplePayload, []string{`body.message matches "created"`}, "", nil); err != nil {
+		t.Fatalf("unanchored partial match should pass: %v", err)
+	}
+}
+
+func TestEvalExprs_MatchesMissingPathFails(t *testing.T) {
+	if err := EvalExprs(samplePayload, []string{`body.nonexistent matches "x"`}, "", nil); err == nil {
+		t.Fatal("matches should fail on missing path (empty actual)")
+	}
+}
+
+// ——————————————————————————————————————————
+// EvalExprs — is <type> (JSON type assertion)
+// ——————————————————————————————————————————
+
+// snowflake-id-as-string vs raw number: the motivating type-regression case.
+var orderNoStringPayload = []byte(`{"body":{"data":{"orderNo":"123456789012345678"}}}`)
+var orderNoNumberPayload = []byte(`{"body":{"data":{"orderNo":123456789012345678}}}`)
+
+func TestEvalExprs_IsString(t *testing.T) {
+	if err := EvalExprs(orderNoStringPayload, []string{"body.data.orderNo is string"}, "", nil); err != nil {
+		t.Fatalf("is string should pass for JSON string: %v", err)
+	}
+	if err := EvalExprs(orderNoNumberPayload, []string{"body.data.orderNo is string"}, "", nil); err == nil {
+		t.Fatal("is string should fail for JSON number")
+	}
+}
+
+func TestEvalExprs_EqCannotCatchTypeRegression(t *testing.T) {
+	// documents the gap `is` closes: == passes for BOTH the string and the
+	// number serialization of the same orderNo, so it cannot catch a
+	// snowflake-ID-no-longer-serialized-as-string regression.
+	if err := EvalExprs(orderNoStringPayload, []string{"body.data.orderNo == 123456789012345678"}, "", nil); err != nil {
+		t.Fatalf("== should pass for string payload: %v", err)
+	}
+	if err := EvalExprs(orderNoNumberPayload, []string{"body.data.orderNo == 123456789012345678"}, "", nil); err != nil {
+		t.Fatalf("== should pass for number payload: %v", err)
+	}
+}
+
+func TestEvalExprs_IsAllTypes(t *testing.T) {
+	payload := []byte(`{"s":"x","n":42,"bt":true,"bf":false,"nul":null,"arr":[1],"obj":{"k":1}}`)
+	pass := []string{
+		"s is string", "n is number", "bt is bool", "bf is bool",
+		"nul is null", "arr is array", "obj is object",
+	}
+	for _, expr := range pass {
+		if err := EvalExprs(payload, []string{expr}, "", nil); err != nil {
+			t.Errorf("%q should pass: %v", expr, err)
+		}
+	}
+	fail := []string{
+		"s is number", "n is string", "bt is number",
+		"nul is string", "arr is object", "obj is array",
+	}
+	for _, expr := range fail {
+		if err := EvalExprs(payload, []string{expr}, "", nil); err == nil {
+			t.Errorf("%q should fail", expr)
+		}
+	}
+}
+
+func TestEvalExprs_IsMissingPathFails(t *testing.T) {
+	err := EvalExprs(samplePayload, []string{"body.nonexistent is string"}, "", nil)
+	if err == nil {
+		t.Fatal("is should fail on missing path")
+	}
+	if !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("failure message should say the path is missing, got: %v", err)
+	}
+}
+
+func TestEvalExprs_IsStandaloneInvalid(t *testing.T) {
+	// standalone assertions carry string literals only — a type assertion is
+	// meaningless there and must be rejected as EXPECT_INVALID.
+	err := EvalExprs(nil, []string{"hello is string"}, "", nil)
+	if err == nil {
+		t.Fatal("standalone `is` must be rejected")
+	}
+	if !strings.Contains(err.Error(), "EXPECT_INVALID") {
+		t.Fatalf("expected EXPECT_INVALID, got: %v", err)
 	}
 }
 
