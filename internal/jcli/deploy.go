@@ -82,7 +82,9 @@ func RunDeploy(ctx context.Context, cl *Client, grp *Group, job, service string,
 	if len(dep.Steps) == 0 {
 		return out, nil
 	}
-	out.Steps, err = runSteps(ctx, dep, grp.Vars, service, cliParams, out.Extracted, out.Artifacts)
+	// params, not cliParams: steps template against the same values sent to
+	// Jenkins (deploy.params defaults ⊕ CLI overrides).
+	out.Steps, err = runSteps(ctx, dep, grp.Vars, service, params, out.Extracted, out.Artifacts)
 	return out, err
 }
 

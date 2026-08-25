@@ -59,6 +59,46 @@ func TestRunDeploy_ExtractAndSteps(t *testing.T) {
 	}
 }
 
+// stepParamEcho runs a deploy whose single step echoes ${param.limit} into a
+// file, and returns what the step actually saw.
+func stepParamEcho(t *testing.T, depParams, cliParams map[string]string) string {
+	t.Helper()
+	t.Setenv("AIDEV_CLIS_HOME", t.TempDir())
+	writeCred(t, "jenkins.t", "ci", "tok")
+	srv := deployServer(t)
+	defer srv.Close()
+	cl, _ := NewClient(&Config{BaseURL: srv.URL, Credential: "jenkins.t"})
+	cl.pollEvery = 0
+
+	outFile := filepath.ToSlash(filepath.Join(t.TempDir(), "out"))
+	grp := &Group{Deploy: &DeployConfig{
+		Params: depParams,
+		Steps:  [][]string{{"bash", "-c", "echo ${param.limit} > " + outFile}},
+	}}
+	if _, err := RunDeploy(context.Background(), cl, grp, "build-svc", "svc", cliParams, true); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// Steps template against the same params sent to Jenkins: config defaults ⊕ CLI.
+func TestRunDeploy_StepsSeeConfiguredParamDefault(t *testing.T) {
+	if got := stepParamEcho(t, map[string]string{"limit": "5"}, nil); got != "5" {
+		t.Fatalf("step saw ${param.limit}=%q, want the configured default 5", got)
+	}
+}
+
+func TestRunDeploy_StepParamCLIOverridesConfiguredDefault(t *testing.T) {
+	got := stepParamEcho(t, map[string]string{"limit": "5"}, map[string]string{"limit": "9"})
+	if got != "9" {
+		t.Fatalf("step saw ${param.limit}=%q, want the CLI override 9", got)
+	}
+}
+
 func TestRunDeploy_BinaryDenied(t *testing.T) {
 	t.Setenv("AIDEV_CLIS_HOME", t.TempDir())
 	writeCred(t, "jenkins.t", "ci", "tok")

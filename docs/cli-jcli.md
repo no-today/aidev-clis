@@ -122,7 +122,9 @@ vars: { kubeconfig: ~/.kube/uat.yaml }              # template values (~ expande
 - **Templating** uses `${...}`: `${service}`, `${param.k}` (or bare `${k}`),
   `${vars.X}`, extract names like `${tag}`, and `${artifacts.N}` (bare index =
   fileName), `${artifacts.N.fileName}`, `${artifacts.N.relativePath}` (N is 0-based,
-  in steps). A literal `{...}` passes through (so `kubectl ... -p '{"spec":…}'` and
+  in steps). `${param.k}`/`${k}` resolve against the same set POSTed to the build —
+  `deploy.params` defaults ⊕ `--param` overrides — so a step can reference a preset
+  the caller never passed. A literal `{...}` passes through (so `kubectl ... -p '{"spec":…}'` and
   jsonpath `{.status}` are fine); `$$` is a literal `$` so a `bash -c` step can use
   the shell's own `${VAR}`. An unknown `${token}` is a hard error.
 - **Steps are argv arrays, never a shell** (unless you explicitly write
