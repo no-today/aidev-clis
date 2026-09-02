@@ -32,6 +32,13 @@ type CallRequest struct {
 	Body    []byte
 	Timeout time.Duration
 
+	// Form holds the parsed -F parts. Body already carries their encoding —
+	// Form exists only so ToCurl and the audit record can describe the request
+	// without re-parsing. ContentType is the multipart/form-data value
+	// (boundary included) that EncodeForm computed alongside Body.
+	Form        []FormPart
+	ContentType string
+
 	OutputFile  string
 	HeadersFile string
 
@@ -102,6 +109,13 @@ func DoRequest(tg *Target, req *CallRequest, sess Session) (*RawResponse, error)
 		if k, v, ok := strings.Cut(h, ":"); ok {
 			hreq.Header.Set(strings.TrimSpace(k), strings.TrimSpace(v))
 		}
+	}
+	// AFTER the -H loop on purpose. -F computes the boundary, and a per-call
+	// -H Content-Type would otherwise clobber it — which is precisely the
+	// "no multipart boundary was found" failure this flag removes. The command
+	// layer rejects that combination outright; this is the second line.
+	if req.ContentType != "" {
+		hreq.Header.Set("Content-Type", req.ContentType)
 	}
 	timeout := req.Timeout
 	if timeout == 0 {
@@ -259,6 +273,9 @@ func ToCurl(tg *Target, req *CallRequest) string {
 	}
 	if inj := redactTemplate(tg.Auth.Inject.Cookie); inj != "" {
 		b.WriteString(" \\\n  -b '" + inj + "'")
+	}
+	for _, p := range req.Form {
+		b.WriteString(" \\\n  -F '" + formArgString(p) + "'")
 	}
 	if len(req.Body) > 0 {
 		b.WriteString(" \\\n  -d '" + string(req.Body) + "'")
