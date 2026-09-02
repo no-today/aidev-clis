@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/no-today/aidev-clis/internal/core/errs"
 )
 
 func TestParseFormArgs(t *testing.T) {
@@ -57,8 +59,13 @@ func TestParseFormArgsErrors(t *testing.T) {
 		"f=@/tmp/x;bogus=1", // unknown modifier
 		"f=@/tmp/x;novalue", // modifier without "="
 	} {
-		if _, err := ParseFormArgs([]string{arg}); err == nil {
+		_, err := ParseFormArgs([]string{arg})
+		if err == nil {
 			t.Errorf("expected error for -F %q, got nil", arg)
+			continue
+		}
+		if code := errs.From(err).Code; code != "FORM_ARG_INVALID" {
+			t.Errorf("-F %q: code = %q, want FORM_ARG_INVALID", arg, code)
 		}
 	}
 }
@@ -191,18 +198,32 @@ func TestEncodeFormIsBinarySafe(t *testing.T) {
 func TestEncodeFormErrors(t *testing.T) {
 	big := writeFixture(t, "big.bin", make([]byte, 100))
 	parts, _ := ParseFormArgs([]string{"f=@" + big})
-	if _, _, err := EncodeForm(parts, 50); err == nil {
-		t.Error("expected FORM_TOO_LARGE when the total exceeds the cap")
+	_, _, err := EncodeForm(parts, 50)
+	if err == nil {
+		t.Fatal("expected FORM_TOO_LARGE when the total exceeds the cap")
+	}
+	if code := errs.From(err).Code; code != "FORM_TOO_LARGE" {
+		t.Errorf("over-cap: code = %q, want FORM_TOO_LARGE", code)
 	}
 
 	missing, _ := ParseFormArgs([]string{"f=@" + filepath.Join(t.TempDir(), "nope.bin")})
-	if _, _, err := EncodeForm(missing, 1<<20); err == nil {
-		t.Error("expected FORM_FILE_UNREADABLE for a missing file")
+	_, _, err = EncodeForm(missing, 1<<20)
+	if err == nil {
+		t.Fatal("expected FORM_FILE_UNREADABLE for a missing file")
+	}
+	if code := errs.From(err).Code; code != "FORM_FILE_UNREADABLE" {
+		t.Errorf("missing file: code = %q, want FORM_FILE_UNREADABLE", code)
 	}
 
+	// A directory is not a regular file, so it is rejected the same way a
+	// FIFO or other special file is (see form_unix_test.go for that case).
 	dir, _ := ParseFormArgs([]string{"f=@" + t.TempDir()})
-	if _, _, err := EncodeForm(dir, 1<<20); err == nil {
-		t.Error("expected FORM_FILE_UNREADABLE for a directory")
+	_, _, err = EncodeForm(dir, 1<<20)
+	if err == nil {
+		t.Fatal("expected FORM_FILE_UNREADABLE for a directory")
+	}
+	if code := errs.From(err).Code; code != "FORM_FILE_UNREADABLE" {
+		t.Errorf("directory: code = %q, want FORM_FILE_UNREADABLE", code)
 	}
 }
 
