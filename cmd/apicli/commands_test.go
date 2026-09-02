@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -852,5 +853,295 @@ func TestAppsCmd_ListsAppsAndActors(t *testing.T) {
 	}
 	if strings.Join(env.Data[0].Actors, ",") != "admin,default" {
 		t.Fatalf("app1 actors: %v", env.Data[0].Actors)
+	}
+}
+
+func TestParseUploadSize(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want int64
+	}{
+		{"1024", 1024},
+		{"512MB", 512 << 20},
+		{"512mb", 512 << 20},
+		{" 2GB ", 2 << 30},
+		{"64KB", 64 << 10},
+	} {
+		got, err := parseUploadSize(tc.in)
+		if err != nil {
+			t.Errorf("parseUploadSize(%q) errored: %v", tc.in, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("parseUploadSize(%q) = %d, want %d", tc.in, got, tc.want)
+		}
+	}
+	for _, bad := range []string{"", "0", "-5", "abc", "12PB", "9223372036854775807GB"} {
+		_, err := parseUploadSize(bad)
+		if err == nil {
+			t.Errorf("expected error for --max-upload %q, got nil", bad)
+			continue
+		}
+		if code := errs.From(err).Code; code != "MAX_UPLOAD_INVALID" {
+			t.Errorf("--max-upload %q: code = %q, want MAX_UPLOAD_INVALID", bad, code)
+		}
+	}
+}
+
+// TestCallFormUploadIsBinarySafe is the end-to-end regression for the two
+// shell-variable failure modes: command substitution strips trailing newlines,
+// and shell variables truncate at NUL. Going file -> socket must preserve bytes.
+func TestCallFormUploadIsBinarySafe(t *testing.T) {
+	raw := []byte{0x89, 'P', 'N', 'G', 0x00, 0x00, '\r', '\n', 0xFF, '\n', '\n'}
+
+	var gotMethod string
+	var gotNames []string
+	var gotSums [][32]byte
+	var gotField string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Errorf("server could not parse multipart: %v", err)
+			w.WriteHeader(400)
+			return
+		}
+		gotField = r.FormValue("entranceExitId")
+		for _, fh := range r.MultipartForm.File["images"] {
+			gotNames = append(gotNames, fh.Filename)
+			f, err := fh.Open()
+			if err != nil {
+				t.Errorf("open uploaded file: %v", err)
+				continue
+			}
+			b, _ := io.ReadAll(f)
+			_ = f.Close()
+			gotSums = append(gotSums, sha256.Sum256(b))
+		}
+		_, _ = w.Write([]byte(`{"code":0}`))
+	}))
+	defer srv.Close()
+
+	home := t.TempDir()
+	t.Setenv("AIDEV_CLIS_HOME", home)
+	writeApicliYAML(t, home, srv.URL)
+
+	a := filepath.Join(home, "a.png")
+	b := filepath.Join(home, "b.png")
+	if err := os.WriteFile(a, raw, 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	if err := os.WriteFile(b, raw, 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	out := runCLI(t, "call", "shop", "/api/upload", "--base-url", srv.URL,
+		"-F", "entranceExitId=11085",
+		"-F", "images=@"+a,
+		"-F", "images=@"+b)
+
+	// -F implies POST, matching curl — otherwise this would be a body-bearing GET.
+	if gotMethod != "POST" {
+		t.Errorf("method = %q, want POST", gotMethod)
+	}
+	if gotField != "11085" {
+		t.Errorf("plain field = %q, want 11085", gotField)
+	}
+	// Repeated -F with one name binds as a list, in order.
+	if len(gotNames) != 2 || gotNames[0] != "a.png" || gotNames[1] != "b.png" {
+		t.Fatalf("uploaded filenames = %v, want [a.png b.png]", gotNames)
+	}
+	want := sha256.Sum256(raw)
+	for i, sum := range gotSums {
+		if sum != want {
+			t.Errorf("file %d altered in transit: got %x want %x", i, sum, want)
+		}
+	}
+	if !bytes.Contains(out, []byte(`"ok":true`)) {
+		t.Errorf("expected ok envelope, got: %s", out)
+	}
+}
+
+// TestCallFormExplicitMethodWins proves -X still beats the POST default.
+func TestCallFormExplicitMethodWins(t *testing.T) {
+	var gotMethod string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		_, _ = w.Write([]byte(`{"code":0}`))
+	}))
+	defer srv.Close()
+
+	home := t.TempDir()
+	t.Setenv("AIDEV_CLIS_HOME", home)
+	writeApicliYAML(t, home, srv.URL)
+
+	runCLI(t, "call", "shop", "/api/upload", "--base-url", srv.URL,
+		"-X", "PUT", "-F", "a=1")
+	if gotMethod != "PUT" {
+		t.Errorf("method = %q, want PUT — explicit -X must beat the -F POST default", gotMethod)
+	}
+}
+
+func TestCallFormRejectsOverCap(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AIDEV_CLIS_HOME", home)
+	writeApicliYAML(t, home, "http://unused.example")
+	f := filepath.Join(home, "big.bin")
+	if err := os.WriteFile(f, make([]byte, 4096), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	// Validation runs before any network call, so no test server is needed.
+	out := runCLI(t, "call", "shop", "/api/upload", "-F", "f=@"+f, "--max-upload", "1024")
+	if !bytes.Contains(out, []byte("FORM_TOO_LARGE")) {
+		t.Fatalf("expected FORM_TOO_LARGE, got: %s", out)
+	}
+	if !bytes.Contains(out, []byte("--max-upload")) {
+		t.Errorf("error should name --max-upload so the cap is adjustable, got: %s", out)
+	}
+}
+
+// readApicliAuditLines returns every audit JSONL line under $AIDEV_CLIS_HOME/audit/.
+func readApicliAuditLines(t *testing.T, home string) []map[string]any {
+	t.Helper()
+	dir := filepath.Join(home, "audit")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read audit dir: %v", err)
+	}
+	var lines []map[string]any
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		for _, ln := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+			if ln == "" {
+				continue
+			}
+			var m map[string]any
+			if err := json.Unmarshal([]byte(ln), &m); err != nil {
+				t.Fatalf("bad audit line %q: %v", ln, err)
+			}
+			lines = append(lines, m)
+		}
+	}
+	return lines
+}
+
+// TestCallFormAuditRecordsShapeNotContent: the structured audit request.form
+// record must let an operator see WHAT was uploaded (field names, paths,
+// sizes) without recording the values or the bytes. -d bodies are not
+// audited either; this keeps parity within that structured record.
+//
+// This guarantee is scoped to the structured record — NOT the whole audit
+// line. The line's "command" field is audit.CommandLine(os.Args), the full
+// argv, unredacted, exactly like every other apicli invocation (-d included).
+// A scan of the WHOLE audit file for the leaked value would therefore be
+// vacuous under this harness: runCLI drives cobra in-process via
+// root.SetArgs, so "command" is stamped from the TEST BINARY's os.Args, not
+// from these -F arguments — the scan could never fail here regardless of
+// what the shipped binary does. See the audit section of
+// docs/superpowers/specs/2026-09-02-apicli-form-upload-design.md.
+func TestCallFormAuditRecordsShapeNotContent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseMultipartForm(1 << 20)
+		_, _ = w.Write([]byte(`{"code":0}`))
+	}))
+	defer srv.Close()
+
+	home := t.TempDir()
+	t.Setenv("AIDEV_CLIS_HOME", home)
+	writeApicliYAML(t, home, srv.URL)
+
+	img := filepath.Join(home, "a.png")
+	if err := os.WriteFile(img, []byte("ABCDE"), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	runCLI(t, "call", "shop", "/api/upload", "--base-url", srv.URL,
+		"-F", "idCardNo=110101199001011234",
+		"-F", "images=@"+img)
+
+	var form []any
+	var auditLine map[string]any
+	for _, ln := range readApicliAuditLines(t, home) {
+		req, ok := ln["request"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if f, ok := req["form"].([]any); ok {
+			form = f
+			auditLine = ln
+		}
+	}
+	if len(form) != 2 {
+		t.Fatalf("audit should record 2 form parts, got %d: %+v", len(form), form)
+	}
+	plain := form[0].(map[string]any)
+	if plain["name"] != "idCardNo" {
+		t.Errorf("plain part name = %v, want idCardNo", plain["name"])
+	}
+	if _, leaked := plain["value"]; leaked {
+		t.Error("audit must never record a form field VALUE")
+	}
+	file := form[1].(map[string]any)
+	if file["name"] != "images" || file["file"] != img {
+		t.Errorf("file part wrong: %+v", file)
+	}
+	if bytesLogged, _ := file["bytes"].(float64); bytesLogged != 5 {
+		t.Errorf("file part bytes = %v, want 5", file["bytes"])
+	}
+
+	// Belt and braces: scan the WHOLE audit line for the leaked value, except
+	// "command" — command is excluded because under this in-process test
+	// harness (root.SetArgs) it is stamped from the TEST BINARY's os.Args, not
+	// from these -F arguments (see the comment on this test), so including it
+	// would make the scan vacuous. Every other top-level field (result,
+	// outcome, request, ...) is real leak surface and stays in scope.
+	delete(auditLine, "command")
+	lineJSON, err := json.Marshal(auditLine)
+	if err != nil {
+		t.Fatalf("marshal audit line: %v", err)
+	}
+	if bytes.Contains(lineJSON, []byte("110101199001011234")) {
+		t.Fatalf("form field value leaked into the audit line: %s", lineJSON)
+	}
+	if bytes.Contains(lineJSON, []byte("ABCDE")) {
+		t.Fatalf("file content leaked into the audit line: %s", lineJSON)
+	}
+}
+
+func TestCallFormRejectsConflictingFlags(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AIDEV_CLIS_HOME", home)
+	// The third sub-case below (an unrelated -H) passes both guards and
+	// reaches the transport. http://127.0.0.1:1 is the repo's precedent for
+	// an intentionally-unreachable base URL (see TestCall_RawErrorIsPlainLine)
+	// — unlike "unused.example", it can't resolve to a real host under a
+	// wildcard-DNS resolver and accidentally send a request somewhere.
+	writeApicliYAML(t, home, "http://127.0.0.1:1")
+
+	// -F builds the body itself; -d would be silently discarded.
+	out := runCLI(t, "call", "shop", "/api/upload", "-F", "a=1", "-d", `{"x":1}`)
+	if !bytes.Contains(out, []byte("REQUEST_INVALID")) {
+		t.Errorf("expected REQUEST_INVALID for -F with -d, got: %s", out)
+	}
+
+	// A hand-written Content-Type has no boundary and would break the upload —
+	// this is the exact failure -F exists to remove, so reject it loudly.
+	out = runCLI(t, "call", "shop", "/api/upload",
+		"-F", "a=1", "-H", "content-type: multipart/form-data")
+	if !bytes.Contains(out, []byte("REQUEST_INVALID")) {
+		t.Errorf("expected REQUEST_INVALID for -F with -H Content-Type, got: %s", out)
+	}
+	if !bytes.Contains(out, []byte("boundary")) {
+		t.Errorf("error should explain that -F computes the boundary, got: %s", out)
+	}
+
+	// An unrelated -H is fine.
+	out = runCLI(t, "call", "shop", "/api/upload", "-F", "a=1", "-H", "X-Trace: t1")
+	if bytes.Contains(out, []byte("REQUEST_INVALID")) {
+		t.Errorf("an unrelated -H must not be rejected, got: %s", out)
 	}
 }

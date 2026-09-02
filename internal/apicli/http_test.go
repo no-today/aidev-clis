@@ -318,3 +318,31 @@ func TestDoRequestJoinsMultiValueHeaders(t *testing.T) {
 		t.Errorf("Set-Cookie = %q, want \"a=1, b=2\"", got)
 	}
 }
+
+// TestDoRequestFormContentTypeWinsOverHeader is defense in depth: the command
+// layer rejects -F together with -H 'Content-Type', but if one ever reaches
+// DoRequest the computed boundary must still survive. Losing it reproduces the
+// exact "no multipart boundary was found" failure this flag exists to remove.
+func TestDoRequestFormContentTypeWinsOverHeader(t *testing.T) {
+	var seen string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.Header.Get("Content-Type")
+		_, _ = w.Write([]byte(`{"code":0}`))
+	}))
+	defer srv.Close()
+
+	tg := &Target{BaseURL: srv.URL, Auth: Auth{Kind: "none"}}
+	req := &CallRequest{
+		Method:      "POST",
+		Path:        "/upload",
+		Headers:     []string{"Content-Type: multipart/form-data"},
+		Body:        []byte("irrelevant"),
+		ContentType: "multipart/form-data; boundary=XYZ",
+	}
+	if _, err := DoRequest(tg, req, Session{}); err != nil {
+		t.Fatalf("DoRequest: %v", err)
+	}
+	if seen != "multipart/form-data; boundary=XYZ" {
+		t.Fatalf("server saw Content-Type %q, want the computed one with the boundary", seen)
+	}
+}
