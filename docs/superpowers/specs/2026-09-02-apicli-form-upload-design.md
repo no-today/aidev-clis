@@ -77,6 +77,11 @@ stdin is a non-goal.
 | `-F 'images=@/path/a.png;filename=x.png'` | override the transmitted filename |
 | `-F 'images=@a.png' -F 'images=@b.png'` | repeated name → multiple parts, **order preserved**; binds to Spring `List<MultipartFile>` |
 
+**`-F` implies POST.** When `-F` is given and `-X` was not explicitly set,
+the method becomes `POST`, matching curl. Without this, the `-X` default of
+`GET` would silently send a body-bearing GET. Detected via
+`cmd.Flags().Changed("request")`, so an explicit `-X PUT` still wins.
+
 **Deliberate deviation from curl:** `;type=` and `;filename=` are parsed
 **only** on the `@` form. For a plain field, everything after the first `=` is
 the literal value, semicolons included. curl parses `;type=` on plain fields
@@ -144,6 +149,8 @@ so an over-cap request fails without allocating.
 | `-F` argument has no `=`, or an unrecognized modifier | `errs.Config("FORM_ARG_INVALID", ...)` |
 | file missing, unreadable, or a directory | `errs.General("FORM_FILE_UNREADABLE", ...)` |
 | total size over the cap | `errs.General("FORM_TOO_LARGE", ...)` — message names `--max-upload` |
+| `--max-upload` not a positive size | `errs.Config("MAX_UPLOAD_INVALID", ...)` |
+| multipart writer failure (unreachable in practice — the sink is a `bytes.Buffer`) | `errs.General("FORM_ENCODE_FAILED", ...)` |
 
 The Content-Type conflict is rejected rather than ignored or honored: it
 converts the exact failure that motivated this work from a server-side
