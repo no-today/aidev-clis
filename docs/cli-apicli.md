@@ -70,6 +70,8 @@ All flags below are on `apicli call`. Addressing flags (`--actor`, `--env`,
 | `--request` | `-X` | `GET` | HTTP method |
 | `--header` | `-H` | — | request header, repeatable |
 | `--data` | `-d` | — | request body (raw passthrough, no re-encoding) |
+| `--form` | `-F` | — | multipart field, repeatable (implies POST) |
+| `--max-upload` | — | `512MB` | cap on total upload bytes |
 | `--output` | — | `json` | `json` (envelope) or `raw` (body only) |
 | `--output-file` | — | — | stream the response body to this file (binary-safe) |
 | `--headers-file` | — | — | write `{status_code, url, headers}` JSON to this file |
@@ -114,6 +116,37 @@ apicli call shop /api/export --actor demo \
 - `--headers-file` writes `{status_code, url, headers}` — so a script can read
   `Content-Disposition` (filename), `Content-Type`, or a header-borne trace id
   even though the body never enters the envelope.
+
+### Binary-safe in both directions
+
+`--output-file` covers downloads; `-F` covers uploads. They exist for the same
+reason: bytes must not round-trip through a shell variable or the JSON envelope.
+
+`-d` is a raw string. Routing a file through it is not merely awkward, it is
+unsound — shell command substitution strips trailing newlines (corrupting a
+multipart body's byte-sensitive closing delimiter) and shell variables truncate
+at the NUL bytes present in real PNG/JPEG content. `-F` reads the file itself:
+
+```sh
+apicli call shop /api/entrance/upload \
+  -F 'entranceExitId=11085' \
+  -F 'images=@/tmp/a.png' \
+  -F 'images=@/tmp/b.png;type=image/png'
+```
+
+Repeating a field name sends repeated parts in order, which is what a Spring
+`List<MultipartFile>` parameter binds to. apicli computes the boundary,
+`Content-Type`, and `Content-Length`; passing your own
+`-H 'Content-Type: multipart/form-data'` is rejected rather than silently
+overriding the boundary.
+
+`;type=` sets the part's content type (otherwise inferred from the extension)
+and `;filename=` overrides the transmitted name. Both are parsed only on the
+`@file` form — for a plain field, everything after `=` is the literal value.
+
+The body is buffered in memory so an expired session can be replayed after an
+automatic re-login. `--max-upload` bounds that buffer; it is a memory guardrail,
+not a protocol limit.
 
 ### Inline actor — `--actor-file`
 

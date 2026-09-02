@@ -1,6 +1,6 @@
 ---
 name: aidev-apicli
-description: Use when managing aidev HTTP session state or making HTTP calls with apicli login (capture a session via a flow), apicli whoami (inspect current session), apicli logout (remove session file), or apicli call (send HTTP request with injected session). Covers verb-first addressing, auto-login + auto-relogin (call is self-sufficient — no login-first), the {data}/{error} envelope, per-app response predicates, actors (incl. secret:<name>), and flow fidelity — multi-step + cross-step capture, per-step assert, cookie_from_set_cookie, multi-header inject, vars_defaults, extra_headers, trace_field, and file downloads (--output-file).
+description: Use when managing aidev HTTP session state or making HTTP calls with apicli login (capture a session via a flow), apicli whoami (inspect current session), apicli logout (remove session file), or apicli call (send HTTP request with injected session). Covers verb-first addressing, auto-login + auto-relogin (call is self-sufficient — no login-first), the {data}/{error} envelope, per-app response predicates, actors (incl. secret:<name>), and flow fidelity — multi-step + cross-step capture, per-step assert, cookie_from_set_cookie, multi-header inject, vars_defaults, extra_headers, trace_field, and binary-safe file transfer in both directions (-F upload, --output-file download).
 ---
 
 # apicli
@@ -111,6 +111,8 @@ full rules in the **aidev-dbcli** skill.
 | `--request` | `-X` | `GET` | HTTP method |
 | `--header` | `-H` | — | request header (repeatable) |
 | `--data` | `-d` | — | request body (raw passthrough) |
+| `--form` | `-F` | — | multipart field, repeatable (implies POST) |
+| `--max-upload` | — | `512MB` | cap on total upload bytes |
 | `--output` | — | `json` | `json` (envelope) or `raw` (body only) |
 | `--output-file` | — | — | stream the response body to a file (binary-safe; envelope keeps metadata) |
 | `--headers-file` | — | — | write `{status_code,url,headers}` JSON to a file |
@@ -123,6 +125,17 @@ full rules in the **aidev-dbcli** skill.
 
 Body is always raw passthrough — `-d 'a=1&b=2'` with a form `Content-Type`
 reaches the server unchanged. No implicit JSON re-encoding.
+
+- **`-F 'name=value'` / `-F 'name=@/path/file.png'`** — multipart upload,
+  repeatable; implies POST. Reads the file from disk, so binary is safe.
+  **Never** build a multipart body by hand and pass it via `-d`: command
+  substitution strips trailing newlines and shell variables truncate at NUL,
+  so binary files corrupt silently. Repeat the same name for a list of files
+  (`-F 'images=@a.png' -F 'images=@b.png'`). Add `;type=image/png` to set the
+  part's content type, `;filename=x.png` to rename it. Do not pass
+  `-H 'Content-Type: ...'` alongside `-F` — apicli computes the boundary and
+  will reject the combination. `--max-upload` (default `512MB`) bounds the
+  in-memory buffer.
 
 ## Login-flow fidelity (you CAN model complex legacy auth)
 
