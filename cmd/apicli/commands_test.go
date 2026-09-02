@@ -994,6 +994,101 @@ func TestCallFormRejectsOverCap(t *testing.T) {
 	}
 }
 
+// readApicliAuditLines returns every audit JSONL line under $AIDEV_CLIS_HOME/audit/.
+func readApicliAuditLines(t *testing.T, home string) []map[string]any {
+	t.Helper()
+	dir := filepath.Join(home, "audit")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read audit dir: %v", err)
+	}
+	var lines []map[string]any
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		for _, ln := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+			if ln == "" {
+				continue
+			}
+			var m map[string]any
+			if err := json.Unmarshal([]byte(ln), &m); err != nil {
+				t.Fatalf("bad audit line %q: %v", ln, err)
+			}
+			lines = append(lines, m)
+		}
+	}
+	return lines
+}
+
+// TestCallFormAuditRecordsShapeNotContent: the audit trail must let an operator
+// see WHAT was uploaded (field names, paths, sizes) without recording the
+// values or the bytes. -d bodies are not audited either; this keeps parity and
+// keeps PII off disk.
+func TestCallFormAuditRecordsShapeNotContent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseMultipartForm(1 << 20)
+		_, _ = w.Write([]byte(`{"code":0}`))
+	}))
+	defer srv.Close()
+
+	home := t.TempDir()
+	t.Setenv("AIDEV_CLIS_HOME", home)
+	writeApicliYAML(t, home, srv.URL)
+
+	img := filepath.Join(home, "a.png")
+	if err := os.WriteFile(img, []byte("ABCDE"), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	runCLI(t, "call", "shop", "/api/upload", "--base-url", srv.URL,
+		"-F", "idCardNo=110101199001011234",
+		"-F", "images=@"+img)
+
+	var form []any
+	for _, ln := range readApicliAuditLines(t, home) {
+		req, ok := ln["request"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if f, ok := req["form"].([]any); ok {
+			form = f
+		}
+	}
+	if len(form) != 2 {
+		t.Fatalf("audit should record 2 form parts, got %d: %+v", len(form), form)
+	}
+	plain := form[0].(map[string]any)
+	if plain["name"] != "idCardNo" {
+		t.Errorf("plain part name = %v, want idCardNo", plain["name"])
+	}
+	if _, leaked := plain["value"]; leaked {
+		t.Error("audit must never record a form field VALUE")
+	}
+	file := form[1].(map[string]any)
+	if file["name"] != "images" || file["file"] != img {
+		t.Errorf("file part wrong: %+v", file)
+	}
+	if bytesLogged, _ := file["bytes"].(float64); bytesLogged != 5 {
+		t.Errorf("file part bytes = %v, want 5", file["bytes"])
+	}
+
+	// Belt and braces: the value must not appear anywhere in the audit files.
+	entries, _ := os.ReadDir(filepath.Join(home, "audit"))
+	for _, e := range entries {
+		b, _ := os.ReadFile(filepath.Join(home, "audit", e.Name()))
+		if bytes.Contains(b, []byte("110101199001011234")) {
+			t.Fatalf("form field value leaked into %s", e.Name())
+		}
+		if bytes.Contains(b, []byte("ABCDE")) {
+			t.Fatalf("file content leaked into %s", e.Name())
+		}
+	}
+}
+
 func TestCallFormRejectsConflictingFlags(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("AIDEV_CLIS_HOME", home)

@@ -159,6 +159,9 @@ func callCmd() *cobra.Command {
 				if h := headerMap(headers); len(h) > 0 {
 					reqMap["headers"] = h
 				}
+				if len(formParts) > 0 {
+					reqMap["form"] = formAudit(formParts)
+				}
 				op := beginAudit(tg.App, tg.Env, sideEffecting, reqMap)
 				res, err := apicli.Call(tg, req)
 				if err != nil {
@@ -338,6 +341,22 @@ func headerMap(headers []string) map[string]string {
 			continue
 		}
 		out[k] = strings.TrimSpace(v)
+	}
+	return out
+}
+
+// formAudit records the SHAPE of a multipart body — field names, file paths and
+// sizes. Field VALUES and file content never enter the audit, matching -d
+// bodies, which are not audited either.
+func formAudit(parts []apicli.FormPart) []map[string]any {
+	out := make([]map[string]any, 0, len(parts))
+	for _, p := range parts {
+		e := map[string]any{"name": p.Name}
+		if p.File != "" {
+			e["file"] = p.File
+			e["bytes"] = p.Bytes
+		}
+		out = append(out, e)
 	}
 	return out
 }
