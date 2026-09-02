@@ -1,6 +1,6 @@
 # apicli `-F/--form`: binary-safe multipart upload
 
-**Status:** design approved, not implemented
+**Status:** implemented on branch `form-upload`
 **Date:** 2026-09-02
 
 ## Problem
@@ -162,9 +162,21 @@ converts the exact failure that motivated this work from a server-side
   render a boundary (curl generates its own). The printed command stays a
   genuinely runnable equivalent.
 - The audit `req` record gains `form`: file parts as `{name, file, bytes}`,
-  plain parts as `{name}` only. **No field values, no file content.** This
-  matches the existing treatment of `-d` (request bodies are not audited) and
-  keeps PII off disk.
+  plain parts as `{name}` only. **No field values, no file content** — within
+  that structured `request` record. This matches the existing treatment of
+  `-d` (request bodies are not audited) and keeps that structured record free
+  of PII.
+
+  This guarantee is scoped to `request`/`request.form`, not the audit line as
+  a whole. Every audit line also carries `command`, set from
+  `audit.CommandLine(os.Args)` — the full process argv, unredacted. A `-F
+  idCardNo=110101199001011234` therefore lands verbatim in `command`, exactly
+  as a `-d '{"idCardNo":...}'` body already does; this is pre-existing,
+  deliberate audit behavior (`internal/core/audit/audit.go`: "Payloads are NOT
+  redacted — the log is 0600"), not a regression introduced by `-F`. An agent
+  that cares about a particular `-F` value not landing in the audit log's
+  `command` field should pass it as a file (`-F 'name=@path'`) instead of an
+  inline field value.
 
 The response envelope and output contract are unchanged.
 

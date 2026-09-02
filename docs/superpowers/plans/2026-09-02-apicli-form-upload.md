@@ -38,7 +38,7 @@ Copied from the spec (`docs/superpowers/specs/2026-09-02-apicli-form-upload-desi
 
   A part is a **plain field** when `File == ""` (value in `Value`), otherwise a **file field**. `Bytes` is left zero here; Task 2 fills it.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/apicli/form_test.go`:
 
@@ -100,13 +100,13 @@ func TestParseFormArgsErrors(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/whoog/Dev/aidev-clis-form-upload && go test ./internal/apicli/ -run TestParseFormArgs -v`
 
 Expected: FAIL — `undefined: ParseFormArgs`, `undefined: FormPart`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `internal/apicli/form.go`:
 
@@ -186,13 +186,13 @@ func ParseFormArgs(args []string) ([]FormPart, error) {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /Users/whoog/Dev/aidev-clis-form-upload && go test ./internal/apicli/ -run TestParseFormArgs -v`
 
 Expected: PASS — both `TestParseFormArgs` and `TestParseFormArgsErrors`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/whoog/Dev/aidev-clis-form-upload
@@ -214,7 +214,7 @@ git commit -m "Add ParseFormArgs for apicli -F arguments"
   - `func EncodeForm(parts []FormPart, maxBytes int64) (body []byte, contentType string, err error)` — mutates `parts[i].Bytes` in place for file parts.
   - `func formArgString(p FormPart) string` — re-renders a part as the `-F` argument a user would type (used by `ToCurl` in Task 4; unexported, same package).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `internal/apicli/form_test.go`:
 
@@ -391,13 +391,13 @@ func TestFormArgString(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/whoog/Dev/aidev-clis-form-upload && go test ./internal/apicli/ -run 'TestEncodeForm|TestFormArgString' -v`
 
 Expected: FAIL — `undefined: EncodeForm`, `undefined: formArgString`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `internal/apicli/form.go`, and extend its import block to:
 
@@ -518,13 +518,13 @@ Note on `mime.TypeByExtension`: it returns values like `image/png` on all
 platforms for common extensions, but may append `; charset=utf-8` for text
 types. That is correct MIME and servers accept it — do not strip it.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /Users/whoog/Dev/aidev-clis-form-upload && go test ./internal/apicli/ -v -run 'TestParseFormArgs|TestEncodeForm|TestFormArgString'`
 
 Expected: PASS — all six tests from Tasks 1 and 2.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/whoog/Dev/aidev-clis-form-upload
@@ -548,7 +548,7 @@ Why it lives at the flag layer, not in `internal/apicli`: it parses a CLI flag
 value, and nothing inside `internal/apicli` needs it — `EncodeForm` already
 takes a plain `int64`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `cmd/apicli/commands_test.go`:
 
@@ -581,13 +581,13 @@ func TestParseUploadSize(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/whoog/Dev/aidev-clis-form-upload && go test ./cmd/apicli/ -run TestParseUploadSize -v`
 
 Expected: FAIL — `undefined: parseUploadSize`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Add `"strconv"` to the import block of `cmd/apicli/commands.go`, then append:
 
@@ -616,13 +616,13 @@ func parseUploadSize(s string) (int64, error) {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd /Users/whoog/Dev/aidev-clis-form-upload && go test ./cmd/apicli/ -run TestParseUploadSize -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/whoog/Dev/aidev-clis-form-upload
@@ -644,7 +644,7 @@ git commit -m "Add --max-upload size parser"
   - `Form []FormPart` — parsed parts, used only by `ToCurl` and the audit record.
   - `ContentType string` — the `multipart/form-data; boundary=...` value from `EncodeForm`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `internal/apicli/curl_test.go`:
 
@@ -714,13 +714,13 @@ func TestDoRequestFormContentTypeWinsOverHeader(t *testing.T) {
 If `internal/apicli/http_test.go` does not already import `net/http` and
 `net/http/httptest`, add them.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/whoog/Dev/aidev-clis-form-upload && go test ./internal/apicli/ -run 'TestToCurlRendersFormParts|TestDoRequestFormContentType' -v`
 
 Expected: FAIL — `unknown field Form in struct literal`, `unknown field ContentType in struct literal`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 In `internal/apicli/http.go`, extend `CallRequest` (after the `Body` field):
 
@@ -764,13 +764,13 @@ In `ToCurl`, insert the form loop just before the existing `-d` block:
 preview never encodes, so `Body` is empty whenever `Form` is set — no guard is
 needed between the two.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /Users/whoog/Dev/aidev-clis-form-upload && go test ./internal/apicli/ -v`
 
 Expected: PASS — the whole package, including the pre-existing `TestToCurl` and `TestToCurlRedactsLiveSecrets`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/whoog/Dev/aidev-clis-form-upload
@@ -790,7 +790,7 @@ git commit -m "Carry the multipart body and Content-Type through CallRequest"
 - Consumes: `apicli.ParseFormArgs`, `apicli.EncodeForm`, `apicli.FormPart` (Tasks 1–2); `parseUploadSize` (Task 3); `CallRequest.Form` / `.ContentType` (Task 4).
 - Produces: working `-F` uploads. Task 6 adds the conflict rejections, Task 7 the audit record.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `cmd/apicli/commands_test.go`:
 
@@ -909,13 +909,13 @@ func TestCallFormRejectsOverCap(t *testing.T) {
 
 Ensure `cmd/apicli/commands_test.go` imports `crypto/sha256` and `io`.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/whoog/Dev/aidev-clis-form-upload && go test ./cmd/apicli/ -run 'TestCallForm' -v`
 
 Expected: FAIL — `unknown flag: -F`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 In `cmd/apicli/commands.go`, extend `callCmd`'s var block:
 
@@ -1005,13 +1005,13 @@ Finally, register the flags beside the existing ones:
 		"cap on total upload bytes, e.g. 512MB or 2GB")
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /Users/whoog/Dev/aidev-clis-form-upload && go test ./cmd/apicli/ -v -run 'TestCallForm|TestParseUploadSize'`
 
 Expected: PASS — all four tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/whoog/Dev/aidev-clis-form-upload
@@ -1035,7 +1035,7 @@ Why this is its own gate: it is the difference between reproducing the original
 `no multipart boundary was found` failure and telling the caller why, locally,
 before a request is sent.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `cmd/apicli/commands_test.go`:
 
@@ -1070,13 +1070,13 @@ func TestCallFormRejectsConflictingFlags(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/whoog/Dev/aidev-clis-form-upload && go test ./cmd/apicli/ -run TestCallFormRejectsConflictingFlags -v`
 
 Expected: FAIL — no `REQUEST_INVALID` in the output; the first two calls attempt a real request to `unused.example` instead.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 In `cmd/apicli/commands.go`, inside the `if len(form) > 0 {` block added in
 Task 5, **before** the `ParseFormArgs` call:
@@ -1116,13 +1116,13 @@ func hasContentTypeHeader(headers []string) bool {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /Users/whoog/Dev/aidev-clis-form-upload && go test ./cmd/apicli/ -v`
 
 Expected: PASS — the whole package.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/whoog/Dev/aidev-clis-form-upload
@@ -1142,7 +1142,7 @@ git commit -m "Reject -F combined with -d or an explicit Content-Type"
 - Consumes: `apicli.FormPart` with `Bytes` populated by `EncodeForm` (Task 2).
 - Produces: `func formAudit(parts []apicli.FormPart) []map[string]any`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `cmd/apicli/commands_test.go`. It reuses the audit-reading pattern
 from `cmd/jcli/audit_test.go`:
@@ -1244,13 +1244,13 @@ func TestCallFormAuditRecordsShapeNotContent(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/whoog/Dev/aidev-clis-form-upload && go test ./cmd/apicli/ -run TestCallFormAuditRecordsShapeNotContent -v`
 
 Expected: FAIL — `audit should record 2 form parts, got 0`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 In `cmd/apicli/commands.go`, extend the `reqMap` construction (right after the
 existing `if h := headerMap(headers); len(h) > 0 { ... }` block):
@@ -1286,13 +1286,13 @@ func formAudit(parts []apicli.FormPart) []map[string]any {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /Users/whoog/Dev/aidev-clis-form-upload && go test ./cmd/apicli/ -v`
 
 Expected: PASS — the whole package.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/whoog/Dev/aidev-clis-form-upload
@@ -1316,7 +1316,7 @@ git commit -m "Audit the multipart shape without recording values or content"
 so add one row to each and keep the prose about the durable model, not an
 enumeration.
 
-- [ ] **Step 1: Update `docs/cli-apicli.md`**
+- [x] **Step 1: Update `docs/cli-apicli.md`**
 
 Add to the flag table, directly under the `--data` row:
 
@@ -1360,7 +1360,7 @@ automatic re-login. `--max-upload` bounds that buffer; it is a memory guardrail,
 not a protocol limit.
 ```
 
-- [ ] **Step 2: Update `skills/aidev-apicli/SKILL.md`**
+- [x] **Step 2: Update `skills/aidev-apicli/SKILL.md`**
 
 Add the same two rows to its flag table, and beside the existing body-passthrough
 note add the agent-facing version:
@@ -1382,7 +1382,7 @@ Also update the skill's `description:` frontmatter, which currently ends
 `...and file downloads (--output-file).` — change that to
 `...and binary-safe file transfer in both directions (-F upload, --output-file download).`
 
-- [ ] **Step 3: Verify the docs match reality**
+- [x] **Step 3: Verify the docs match reality**
 
 Run: `cd /Users/whoog/Dev/aidev-clis-form-upload && go run ./cmd/apicli call --help`
 
@@ -1390,14 +1390,14 @@ Expected: the `-F, --form` and `--max-upload` entries appear with the help text
 from Task 5. Confirm every flag named in the two docs exists in this output —
 `-h` is the truth source, so any drift is a docs bug.
 
-- [ ] **Step 4: Run the full pre-commit gate**
+- [x] **Step 4: Run the full pre-commit gate**
 
 Run: `cd /Users/whoog/Dev/aidev-clis-form-upload && make check`
 
 Expected: PASS — gofmt, vet, build, the adapter-isolation guards, the crossbuild
 of all three GOOS, and the full test suite.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/whoog/Dev/aidev-clis-form-upload
