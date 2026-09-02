@@ -102,10 +102,10 @@ The default JSON envelope is already what an agent wants — **don't pass `--out
 
 Response bodies are a PII exit: mask real PII (id numbers, phones, card numbers,
 names) before quoting a response snippet into docs, tests, or persistent notes —
-full rules in the **aidev-dbcli** skill. A `-F` field value is also a PII exit: it
-is recorded verbatim in the audit line's `command` field (full argv, unredacted) —
-pass PII/secret values as a file (`-F 'name=@path'`) rather than an inline field
-when that matters.
+full rules in the **aidev-dbcli** skill. A `-F` field value — like a `-d` body —
+is also a PII exit: both are recorded verbatim in the audit line's `command`
+field (full argv, unredacted) — pass PII/secret values as a file
+(`-F 'name=@path'`) rather than an inline field when that matters.
 
 ## call flags
 
