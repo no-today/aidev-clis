@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"sort"
 	"strconv"
@@ -63,8 +64,8 @@ func (f *commonFlags) resolve(app string) (*apicli.Target, error) {
 func callCmd() *cobra.Command {
 	var f commonFlags
 	var method, data, output string
-	var outputFile, headersFile string
-	var headers []string
+	var outputFile, headersFile, maxUpload string
+	var headers, form []string
 	var timeout time.Duration
 	var curl bool
 	var allowCrossOrigin bool
@@ -90,17 +91,50 @@ func callCmd() *cobra.Command {
 					return err
 				}
 				method = strings.ToUpper(method)
+				// curl semantics: -F implies POST unless -X was given
+				// explicitly. Without this the -X default of GET would send a
+				// body-bearing GET, which no server treats as an upload.
+				if len(form) > 0 && !cmd.Flags().Changed("request") {
+					method = http.MethodPost
+				}
+				var formParts []apicli.FormPart
+				var formContentType string
+				if len(form) > 0 {
+					formParts, err = apicli.ParseFormArgs(form)
+					if err != nil {
+						beginAudit(tg.App, tg.Env, false, nil).Finish(err, nil)
+						return err
+					}
+				}
 				if curl {
 					// Preview only — never hits the backend, so not side-effecting.
 					beginAudit(tg.App, tg.Env, false, nil).Finish(nil, nil)
 					_, _ = os.Stdout.WriteString(apicli.ToCurl(tg, &apicli.CallRequest{
-						Method: method, Path: path, Headers: headers, Body: []byte(data),
+						Method: method, Path: path, Headers: headers,
+						Body: []byte(data), Form: formParts,
 					}) + "\n")
 					return nil
 				}
+				body := []byte(data)
+				if len(formParts) > 0 {
+					limit, perr := parseUploadSize(maxUpload)
+					if perr != nil {
+						beginAudit(tg.App, tg.Env, false, nil).Finish(perr, nil)
+						return perr
+					}
+					// Encoded ONCE, here. Call may resend this exact []byte
+					// after an auto-relogin; re-encoding per attempt would
+					// re-read the files and change the boundary.
+					body, formContentType, err = apicli.EncodeForm(formParts, limit)
+					if err != nil {
+						beginAudit(tg.App, tg.Env, false, nil).Finish(err, nil)
+						return err
+					}
+				}
 				req := &apicli.CallRequest{
 					Method: method, Path: path, Headers: headers,
-					Body: []byte(data), Timeout: timeout,
+					Body: body, Form: formParts, ContentType: formContentType,
+					Timeout:    timeout,
 					OutputFile: outputFile, HeadersFile: headersFile,
 					AllowCrossOrigin: allowCrossOrigin,
 				}
@@ -166,6 +200,10 @@ func callCmd() *cobra.Command {
 	c.Flags().DurationVar(&timeout, "connect-timeout", 0, "overall request timeout, connect + response (default 30s)")
 	c.Flags().BoolVar(&curl, "curl", false, "print equivalent curl, don't execute")
 	c.Flags().BoolVar(&allowCrossOrigin, "allow-cross-origin", false, "permit sending the session to a host other than the app base")
+	c.Flags().StringArrayVarP(&form, "form", "F", nil,
+		"multipart field, repeatable: name=value or name=@file[;type=..][;filename=..] (implies POST)")
+	c.Flags().StringVar(&maxUpload, "max-upload", "512MB",
+		"cap on total upload bytes, e.g. 512MB or 2GB")
 	return c
 }
 

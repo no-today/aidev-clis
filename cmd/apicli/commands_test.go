@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -879,5 +880,116 @@ func TestParseUploadSize(t *testing.T) {
 		if _, err := parseUploadSize(bad); err == nil {
 			t.Errorf("expected error for --max-upload %q, got nil", bad)
 		}
+	}
+}
+
+// TestCallFormUploadIsBinarySafe is the end-to-end regression for the two
+// shell-variable failure modes: command substitution strips trailing newlines,
+// and shell variables truncate at NUL. Going file -> socket must preserve bytes.
+func TestCallFormUploadIsBinarySafe(t *testing.T) {
+	raw := []byte{0x89, 'P', 'N', 'G', 0x00, 0x00, '\r', '\n', 0xFF, '\n', '\n'}
+
+	var gotMethod string
+	var gotNames []string
+	var gotSums [][32]byte
+	var gotField string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Errorf("server could not parse multipart: %v", err)
+			w.WriteHeader(400)
+			return
+		}
+		gotField = r.FormValue("entranceExitId")
+		for _, fh := range r.MultipartForm.File["images"] {
+			gotNames = append(gotNames, fh.Filename)
+			f, err := fh.Open()
+			if err != nil {
+				t.Errorf("open uploaded file: %v", err)
+				continue
+			}
+			b, _ := io.ReadAll(f)
+			_ = f.Close()
+			gotSums = append(gotSums, sha256.Sum256(b))
+		}
+		_, _ = w.Write([]byte(`{"code":0}`))
+	}))
+	defer srv.Close()
+
+	home := t.TempDir()
+	t.Setenv("AIDEV_CLIS_HOME", home)
+	writeApicliYAML(t, home, srv.URL)
+
+	a := filepath.Join(home, "a.png")
+	b := filepath.Join(home, "b.png")
+	if err := os.WriteFile(a, raw, 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	if err := os.WriteFile(b, raw, 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	out := runCLI(t, "call", "shop", "/api/upload", "--base-url", srv.URL,
+		"-F", "entranceExitId=11085",
+		"-F", "images=@"+a,
+		"-F", "images=@"+b)
+
+	// -F implies POST, matching curl — otherwise this would be a body-bearing GET.
+	if gotMethod != "POST" {
+		t.Errorf("method = %q, want POST", gotMethod)
+	}
+	if gotField != "11085" {
+		t.Errorf("plain field = %q, want 11085", gotField)
+	}
+	// Repeated -F with one name binds as a list, in order.
+	if len(gotNames) != 2 || gotNames[0] != "a.png" || gotNames[1] != "b.png" {
+		t.Fatalf("uploaded filenames = %v, want [a.png b.png]", gotNames)
+	}
+	want := sha256.Sum256(raw)
+	for i, sum := range gotSums {
+		if sum != want {
+			t.Errorf("file %d altered in transit: got %x want %x", i, sum, want)
+		}
+	}
+	if !bytes.Contains(out, []byte(`"ok":true`)) {
+		t.Errorf("expected ok envelope, got: %s", out)
+	}
+}
+
+// TestCallFormExplicitMethodWins proves -X still beats the POST default.
+func TestCallFormExplicitMethodWins(t *testing.T) {
+	var gotMethod string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		_, _ = w.Write([]byte(`{"code":0}`))
+	}))
+	defer srv.Close()
+
+	home := t.TempDir()
+	t.Setenv("AIDEV_CLIS_HOME", home)
+	writeApicliYAML(t, home, srv.URL)
+
+	runCLI(t, "call", "shop", "/api/upload", "--base-url", srv.URL,
+		"-X", "PUT", "-F", "a=1")
+	if gotMethod != "PUT" {
+		t.Errorf("method = %q, want PUT — explicit -X must beat the -F POST default", gotMethod)
+	}
+}
+
+func TestCallFormRejectsOverCap(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AIDEV_CLIS_HOME", home)
+	writeApicliYAML(t, home, "http://unused.example")
+	f := filepath.Join(home, "big.bin")
+	if err := os.WriteFile(f, make([]byte, 4096), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	// Validation runs before any network call, so no test server is needed.
+	out := runCLI(t, "call", "shop", "/api/upload", "-F", "f=@"+f, "--max-upload", "1024")
+	if !bytes.Contains(out, []byte("FORM_TOO_LARGE")) {
+		t.Fatalf("expected FORM_TOO_LARGE, got: %s", out)
+	}
+	if !bytes.Contains(out, []byte("--max-upload")) {
+		t.Errorf("error should name --max-upload so the cap is adjustable, got: %s", out)
 	}
 }
