@@ -1,8 +1,12 @@
 package apicli
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -89,6 +93,85 @@ func TestCallAutoRelogin(t *testing.T) {
 	}
 	if logins != 1 {
 		t.Errorf("expected exactly 1 relogin, got %d", logins)
+	}
+}
+
+// TestCallReplaysMultipartBodyByteIdentical pins the central constraint the
+// whole -F design rests on: Call resends the identical *CallRequest after an
+// automatic re-login, so a multipart body must be a buffered []byte that
+// replays byte-for-byte — no disk re-read, no boundary change. Without this,
+// a relogin retry could re-encode from disk (racing a file that changed
+// mid-flight) or regenerate a fresh boundary that no longer matches what was
+// already sent. TestCallAutoRelogin covers the relogin mechanics with a
+// bodyless GET; this test is the multipart-body counterpart.
+func TestCallReplaysMultipartBodyByteIdentical(t *testing.T) {
+	writeHome(t, sampleAPICLI, sampleActors)
+	var logins int32
+	var bodies [][]byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth/login":
+			atomic.AddInt32(&logins, 1)
+			_, _ = w.Write([]byte(`{"code":0,"data":{"token":"fresh"}}`))
+		default:
+			b, _ := io.ReadAll(r.Body)
+			bodies = append(bodies, b)
+			if r.Header.Get("Authorization") == "Bearer fresh" {
+				_, _ = w.Write([]byte(`{"code":0,"data":"ok"}`))
+			} else {
+				_, _ = w.Write([]byte(`{"code":401}`)) // expired_when
+			}
+		}
+	}))
+	defer srv.Close()
+
+	tg := &Target{
+		App: "svc-login", Actor: "alice", BaseURL: srv.URL,
+		Vars: map[string]string{"phoneNo": "144", "password": "p"},
+		Auth: Auth{
+			Kind: "flow", VarsRequired: []string{"phoneNo", "password"},
+			Flow: []FlowStep{{
+				Request: "POST /auth/login\nContent-Type: application/json\n\n{\"phoneNo\":\"{{phoneNo}}\",\"password\":\"{{password}}\"}",
+				Capture: map[string]string{"token": "body.data.token"},
+			}},
+			Inject: AuthInject{Header: "Authorization: Bearer {{token}}"},
+		},
+		Response: Response{OKWhen: "body.code == 0", ExpiredWhen: "body.code == 401"},
+	}
+	// pre-seed a stale session so the first call hits expired_when
+	_ = SaveSession(tg, Session{Vars: map[string]string{"token": "stale"}})
+
+	f := filepath.Join(t.TempDir(), "a.png")
+	if err := os.WriteFile(f, []byte("binary-ish content"), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	parts, err := ParseFormArgs([]string{"entranceExitId=11085", "images=@" + f})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	body, ct, err := EncodeForm(parts, 1<<20)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	res, err := Call(tg, &CallRequest{Method: "POST", Path: "/api/me", Body: body, ContentType: ct})
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if !res.OK || !res.Relogged {
+		t.Fatalf("expected ok+relogged after relogin; got %+v", res)
+	}
+	if logins != 1 {
+		t.Fatalf("expected exactly 1 relogin, got %d", logins)
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("handler should have seen exactly 2 requests, got %d", len(bodies))
+	}
+	if !bytes.Equal(bodies[0], bodies[1]) {
+		t.Fatalf("multipart body changed between the two sends (re-encoded or boundary drifted):\n1st: %x\n2nd: %x", bodies[0], bodies[1])
+	}
+	if !bytes.Equal(bodies[0], body) {
+		t.Fatalf("sent body does not match the once-encoded body — re-encoding happened somewhere")
 	}
 }
 
