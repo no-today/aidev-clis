@@ -877,8 +877,13 @@ func TestParseUploadSize(t *testing.T) {
 		}
 	}
 	for _, bad := range []string{"", "0", "-5", "abc", "12PB", "9223372036854775807GB"} {
-		if _, err := parseUploadSize(bad); err == nil {
+		_, err := parseUploadSize(bad)
+		if err == nil {
 			t.Errorf("expected error for --max-upload %q, got nil", bad)
+			continue
+		}
+		if code := errs.From(err).Code; code != "MAX_UPLOAD_INVALID" {
+			t.Errorf("--max-upload %q: code = %q, want MAX_UPLOAD_INVALID", bad, code)
 		}
 	}
 }
@@ -1025,10 +1030,20 @@ func readApicliAuditLines(t *testing.T, home string) []map[string]any {
 	return lines
 }
 
-// TestCallFormAuditRecordsShapeNotContent: the audit trail must let an operator
-// see WHAT was uploaded (field names, paths, sizes) without recording the
-// values or the bytes. -d bodies are not audited either; this keeps parity and
-// keeps PII off disk.
+// TestCallFormAuditRecordsShapeNotContent: the structured audit request.form
+// record must let an operator see WHAT was uploaded (field names, paths,
+// sizes) without recording the values or the bytes. -d bodies are not
+// audited either; this keeps parity within that structured record.
+//
+// This guarantee is scoped to the structured record — NOT the whole audit
+// line. The line's "command" field is audit.CommandLine(os.Args), the full
+// argv, unredacted, exactly like every other apicli invocation (-d included).
+// A scan of the WHOLE audit file for the leaked value would therefore be
+// vacuous under this harness: runCLI drives cobra in-process via
+// root.SetArgs, so "command" is stamped from the TEST BINARY's os.Args, not
+// from these -F arguments — the scan could never fail here regardless of
+// what the shipped binary does. See the audit section of
+// docs/superpowers/specs/2026-09-02-apicli-form-upload-design.md.
 func TestCallFormAuditRecordsShapeNotContent(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseMultipartForm(1 << 20)
@@ -1049,6 +1064,7 @@ func TestCallFormAuditRecordsShapeNotContent(t *testing.T) {
 		"-F", "images=@"+img)
 
 	var form []any
+	var reqRecord map[string]any
 	for _, ln := range readApicliAuditLines(t, home) {
 		req, ok := ln["request"].(map[string]any)
 		if !ok {
@@ -1056,6 +1072,7 @@ func TestCallFormAuditRecordsShapeNotContent(t *testing.T) {
 		}
 		if f, ok := req["form"].([]any); ok {
 			form = f
+			reqRecord = req
 		}
 	}
 	if len(form) != 2 {
@@ -1076,23 +1093,30 @@ func TestCallFormAuditRecordsShapeNotContent(t *testing.T) {
 		t.Errorf("file part bytes = %v, want 5", file["bytes"])
 	}
 
-	// Belt and braces: the value must not appear anywhere in the audit files.
-	entries, _ := os.ReadDir(filepath.Join(home, "audit"))
-	for _, e := range entries {
-		b, _ := os.ReadFile(filepath.Join(home, "audit", e.Name()))
-		if bytes.Contains(b, []byte("110101199001011234")) {
-			t.Fatalf("form field value leaked into %s", e.Name())
-		}
-		if bytes.Contains(b, []byte("ABCDE")) {
-			t.Fatalf("file content leaked into %s", e.Name())
-		}
+	// Belt and braces, correctly scoped: the value must not appear anywhere in
+	// the structured request record — not in the whole audit file (see the
+	// comment on this test for why that whole-file scan would be vacuous).
+	reqJSON, err := json.Marshal(reqRecord)
+	if err != nil {
+		t.Fatalf("marshal request record: %v", err)
+	}
+	if bytes.Contains(reqJSON, []byte("110101199001011234")) {
+		t.Fatalf("form field value leaked into the structured request record: %s", reqJSON)
+	}
+	if bytes.Contains(reqJSON, []byte("ABCDE")) {
+		t.Fatalf("file content leaked into the structured request record: %s", reqJSON)
 	}
 }
 
 func TestCallFormRejectsConflictingFlags(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("AIDEV_CLIS_HOME", home)
-	writeApicliYAML(t, home, "http://unused.example")
+	// The third sub-case below (an unrelated -H) passes both guards and
+	// reaches the transport. http://127.0.0.1:1 is the repo's precedent for
+	// an intentionally-unreachable base URL (see TestCall_RawErrorIsPlainLine)
+	// — unlike "unused.example", it can't resolve to a real host under a
+	// wildcard-DNS resolver and accidentally send a request somewhere.
+	writeApicliYAML(t, home, "http://127.0.0.1:1")
 
 	// -F builds the body itself; -d would be silently discarded.
 	out := runCLI(t, "call", "shop", "/api/upload", "-F", "a=1", "-d", `{"x":1}`)
