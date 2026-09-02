@@ -1064,7 +1064,7 @@ func TestCallFormAuditRecordsShapeNotContent(t *testing.T) {
 		"-F", "images=@"+img)
 
 	var form []any
-	var reqRecord map[string]any
+	var auditLine map[string]any
 	for _, ln := range readApicliAuditLines(t, home) {
 		req, ok := ln["request"].(map[string]any)
 		if !ok {
@@ -1072,7 +1072,7 @@ func TestCallFormAuditRecordsShapeNotContent(t *testing.T) {
 		}
 		if f, ok := req["form"].([]any); ok {
 			form = f
-			reqRecord = req
+			auditLine = ln
 		}
 	}
 	if len(form) != 2 {
@@ -1093,18 +1093,22 @@ func TestCallFormAuditRecordsShapeNotContent(t *testing.T) {
 		t.Errorf("file part bytes = %v, want 5", file["bytes"])
 	}
 
-	// Belt and braces, correctly scoped: the value must not appear anywhere in
-	// the structured request record — not in the whole audit file (see the
-	// comment on this test for why that whole-file scan would be vacuous).
-	reqJSON, err := json.Marshal(reqRecord)
+	// Belt and braces: scan the WHOLE audit line for the leaked value, except
+	// "command" — command is excluded because under this in-process test
+	// harness (root.SetArgs) it is stamped from the TEST BINARY's os.Args, not
+	// from these -F arguments (see the comment on this test), so including it
+	// would make the scan vacuous. Every other top-level field (result,
+	// outcome, request, ...) is real leak surface and stays in scope.
+	delete(auditLine, "command")
+	lineJSON, err := json.Marshal(auditLine)
 	if err != nil {
-		t.Fatalf("marshal request record: %v", err)
+		t.Fatalf("marshal audit line: %v", err)
 	}
-	if bytes.Contains(reqJSON, []byte("110101199001011234")) {
-		t.Fatalf("form field value leaked into the structured request record: %s", reqJSON)
+	if bytes.Contains(lineJSON, []byte("110101199001011234")) {
+		t.Fatalf("form field value leaked into the audit line: %s", lineJSON)
 	}
-	if bytes.Contains(reqJSON, []byte("ABCDE")) {
-		t.Fatalf("file content leaked into the structured request record: %s", reqJSON)
+	if bytes.Contains(lineJSON, []byte("ABCDE")) {
+		t.Fatalf("file content leaked into the audit line: %s", lineJSON)
 	}
 }
 
