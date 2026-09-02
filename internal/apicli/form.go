@@ -82,8 +82,14 @@ func ParseFormArgs(args []string) ([]FormPart, error) {
 // multipart body, returned with the matching Content-Type (boundary included).
 //
 // Every file is stat-ed and the sizes summed BEFORE any content is read, so an
-// over-cap request fails without allocating. The stat sizes are recorded back
-// into parts so the audit record can report them without a second stat.
+// over-cap request fails without allocating — but that guarantee only holds
+// for a REGULAR file. os.Stat reports Size() == 0 for a FIFO, character
+// device, or socket, so the cap check would pass trivially and the later
+// io.Copy would then read an unbounded (or blocking) stream into memory. Only
+// regular files are accepted, which is what makes "stat and sum before
+// reading any bytes" true in general, not just for the common case. The stat
+// sizes are recorded back into parts so the audit record can report them
+// without a second stat.
 //
 // The body is a plain []byte on purpose: Call replays it verbatim on the
 // auto-relogin retry, with no disk re-read and no boundary change.
@@ -97,9 +103,9 @@ func EncodeForm(parts []FormPart, maxBytes int64) ([]byte, string, error) {
 		if err != nil {
 			return nil, "", errs.General("FORM_FILE_UNREADABLE", err.Error())
 		}
-		if st.IsDir() {
+		if !st.Mode().IsRegular() {
 			return nil, "", errs.General("FORM_FILE_UNREADABLE",
-				parts[i].File+" is a directory, not a file")
+				parts[i].File+" is not a regular file")
 		}
 		parts[i].Bytes = st.Size()
 		total += st.Size()
