@@ -140,6 +140,13 @@ table test.
 Enforcement stats every file and sums the sizes **before reading any bytes**,
 so an over-cap request fails without allocating.
 
+Only regular files are accepted, and that is what makes the sentence above
+true rather than approximately true. `os.Stat` reports `Size() == 0` for a
+FIFO, character device, or socket, so such a part would sail past the cap and
+then stream unbounded into memory — or, for a FIFO with no writer, block
+forever with no output. `--connect-timeout` cannot rescue that: encoding
+completes before the HTTP client is constructed.
+
 ## Errors
 
 | Condition | Code |
@@ -147,7 +154,7 @@ so an over-cap request fails without allocating.
 | `-F` and `-d` both given | `errs.Config("REQUEST_INVALID", ...)` |
 | `-F` and an explicit `-H 'Content-Type: ...'` both given | `errs.Config("REQUEST_INVALID", ...)` — message states that `-F` computes Content-Type and boundary itself |
 | `-F` argument has no `=`, or an unrecognized modifier | `errs.Config("FORM_ARG_INVALID", ...)` |
-| file missing, unreadable, or a directory | `errs.General("FORM_FILE_UNREADABLE", ...)` |
+| file missing, unreadable, or not a regular file (directory, FIFO, device) | `errs.General("FORM_FILE_UNREADABLE", ...)` |
 | total size over the cap | `errs.General("FORM_TOO_LARGE", ...)` — message names `--max-upload` |
 | `--max-upload` not a positive size | `errs.Config("MAX_UPLOAD_INVALID", ...)` |
 | multipart writer failure (unreachable in practice — the sink is a `bytes.Buffer`) | `errs.General("FORM_ENCODE_FAILED", ...)` |
