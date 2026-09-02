@@ -140,9 +140,12 @@ Repeating a field name sends repeated parts in order, which is what a Spring
 `-H 'Content-Type: multipart/form-data'` is rejected rather than silently
 overriding the boundary.
 
-`;type=` sets the part's content type (otherwise inferred from the extension)
-and `;filename=` overrides the transmitted name. Both are parsed only on the
-`@file` form — for a plain field, everything after `=` is the literal value.
+`;type=` sets the part's content type (otherwise inferred from the extension of
+the **transmitted** filename — i.e. after any `;filename=` override, so
+`-F 'd=@/tmp/c.bin;filename=report.pdf'` sends `application/pdf`, not whatever
+`c.bin` would infer) and `;filename=` overrides the transmitted name. Both are
+parsed only on the `@file` form — for a plain field, everything after `=` is
+the literal value.
 
 The body is buffered in memory so an expired session can be replayed after an
 automatic re-login. `--max-upload` bounds that buffer; it is a memory guardrail,
