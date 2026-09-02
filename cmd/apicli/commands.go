@@ -100,6 +100,18 @@ func callCmd() *cobra.Command {
 				var formParts []apicli.FormPart
 				var formContentType string
 				if len(form) > 0 {
+					if data != "" {
+						e := errs.Config("REQUEST_INVALID",
+							"-F and -d are mutually exclusive: -F builds the request body itself")
+						beginAudit(tg.App, tg.Env, false, nil).Finish(e, nil)
+						return e
+					}
+					if hasContentTypeHeader(headers) {
+						e := errs.Config("REQUEST_INVALID",
+							"-F computes Content-Type and the multipart boundary itself; drop the -H 'Content-Type: ...'")
+						beginAudit(tg.App, tg.Env, false, nil).Finish(e, nil)
+						return e
+					}
 					formParts, err = apicli.ParseFormArgs(form)
 					if err != nil {
 						beginAudit(tg.App, tg.Env, false, nil).Finish(err, nil)
@@ -328,6 +340,18 @@ func headerMap(headers []string) map[string]string {
 		out[k] = strings.TrimSpace(v)
 	}
 	return out
+}
+
+// hasContentTypeHeader reports whether a per-call -H sets Content-Type. Matching
+// is case-insensitive because header names are.
+func hasContentTypeHeader(headers []string) bool {
+	for _, h := range headers {
+		if k, _, ok := strings.Cut(h, ":"); ok &&
+			strings.EqualFold(strings.TrimSpace(k), "Content-Type") {
+			return true
+		}
+	}
+	return false
 }
 
 // parseUploadSize accepts a byte count with an optional KB/MB/GB suffix

@@ -993,3 +993,32 @@ func TestCallFormRejectsOverCap(t *testing.T) {
 		t.Errorf("error should name --max-upload so the cap is adjustable, got: %s", out)
 	}
 }
+
+func TestCallFormRejectsConflictingFlags(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AIDEV_CLIS_HOME", home)
+	writeApicliYAML(t, home, "http://unused.example")
+
+	// -F builds the body itself; -d would be silently discarded.
+	out := runCLI(t, "call", "shop", "/api/upload", "-F", "a=1", "-d", `{"x":1}`)
+	if !bytes.Contains(out, []byte("REQUEST_INVALID")) {
+		t.Errorf("expected REQUEST_INVALID for -F with -d, got: %s", out)
+	}
+
+	// A hand-written Content-Type has no boundary and would break the upload —
+	// this is the exact failure -F exists to remove, so reject it loudly.
+	out = runCLI(t, "call", "shop", "/api/upload",
+		"-F", "a=1", "-H", "content-type: multipart/form-data")
+	if !bytes.Contains(out, []byte("REQUEST_INVALID")) {
+		t.Errorf("expected REQUEST_INVALID for -F with -H Content-Type, got: %s", out)
+	}
+	if !bytes.Contains(out, []byte("boundary")) {
+		t.Errorf("error should explain that -F computes the boundary, got: %s", out)
+	}
+
+	// An unrelated -H is fine.
+	out = runCLI(t, "call", "shop", "/api/upload", "-F", "a=1", "-H", "X-Trace: t1")
+	if bytes.Contains(out, []byte("REQUEST_INVALID")) {
+		t.Errorf("an unrelated -H must not be rejected, got: %s", out)
+	}
+}
