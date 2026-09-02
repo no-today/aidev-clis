@@ -1,7 +1,13 @@
 package apicli
 
 import (
+	"bytes"
 	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
+	"net/textproto"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -70,4 +76,99 @@ func ParseFormArgs(args []string) ([]FormPart, error) {
 		parts = append(parts, p)
 	}
 	return parts, nil
+}
+
+// EncodeForm reads the referenced files and encodes parts into a complete
+// multipart body, returned with the matching Content-Type (boundary included).
+//
+// Every file is stat-ed and the sizes summed BEFORE any content is read, so an
+// over-cap request fails without allocating. The stat sizes are recorded back
+// into parts so the audit record can report them without a second stat.
+//
+// The body is a plain []byte on purpose: Call replays it verbatim on the
+// auto-relogin retry, with no disk re-read and no boundary change.
+func EncodeForm(parts []FormPart, maxBytes int64) ([]byte, string, error) {
+	var total int64
+	for i := range parts {
+		if parts[i].File == "" {
+			continue
+		}
+		st, err := os.Stat(parts[i].File)
+		if err != nil {
+			return nil, "", errs.General("FORM_FILE_UNREADABLE", err.Error())
+		}
+		if st.IsDir() {
+			return nil, "", errs.General("FORM_FILE_UNREADABLE",
+				parts[i].File+" is a directory, not a file")
+		}
+		parts[i].Bytes = st.Size()
+		total += st.Size()
+	}
+	if total > maxBytes {
+		return nil, "", errs.General("FORM_TOO_LARGE",
+			fmt.Sprintf("upload totals %d bytes, over the %d-byte cap; raise it with --max-upload",
+				total, maxBytes))
+	}
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	for _, p := range parts {
+		if p.File == "" {
+			if err := w.WriteField(p.Name, p.Value); err != nil {
+				return nil, "", errs.General("FORM_ENCODE_FAILED", err.Error())
+			}
+			continue
+		}
+		// CreatePart, not CreateFormFile: the latter hardcodes
+		// application/octet-stream and would drop the inferred/explicit type.
+		ct := p.ContentType
+		if ct == "" {
+			ct = mime.TypeByExtension(filepath.Ext(p.Filename))
+		}
+		if ct == "" {
+			ct = "application/octet-stream"
+		}
+		h := make(textproto.MIMEHeader)
+		h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`,
+			escapeQuotes(p.Name), escapeQuotes(p.Filename)))
+		h.Set("Content-Type", ct)
+		fw, err := w.CreatePart(h)
+		if err != nil {
+			return nil, "", errs.General("FORM_ENCODE_FAILED", err.Error())
+		}
+		f, err := os.Open(p.File)
+		if err != nil {
+			return nil, "", errs.General("FORM_FILE_UNREADABLE", err.Error())
+		}
+		_, copyErr := io.Copy(fw, f)
+		_ = f.Close()
+		if copyErr != nil {
+			return nil, "", errs.General("FORM_FILE_UNREADABLE", copyErr.Error())
+		}
+	}
+	if err := w.Close(); err != nil {
+		return nil, "", errs.General("FORM_ENCODE_FAILED", err.Error())
+	}
+	return buf.Bytes(), w.FormDataContentType(), nil
+}
+
+// quoteEscaper mirrors mime/multipart's own Content-Disposition quoting.
+var quoteEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"")
+
+func escapeQuotes(s string) string { return quoteEscaper.Replace(s) }
+
+// formArgString re-renders a parsed part as the -F argument a user would type.
+// ToCurl uses it so the printed command is a runnable equivalent.
+func formArgString(p FormPart) string {
+	if p.File == "" {
+		return p.Name + "=" + p.Value
+	}
+	s := p.Name + "=@" + p.File
+	if p.Filename != "" && p.Filename != filepath.Base(p.File) {
+		s += ";filename=" + p.Filename
+	}
+	if p.ContentType != "" {
+		s += ";type=" + p.ContentType
+	}
+	return s
 }
