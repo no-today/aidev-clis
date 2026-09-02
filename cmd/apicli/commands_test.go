@@ -854,3 +854,30 @@ func TestAppsCmd_ListsAppsAndActors(t *testing.T) {
 		t.Fatalf("app1 actors: %v", env.Data[0].Actors)
 	}
 }
+
+func TestParseUploadSize(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want int64
+	}{
+		{"1024", 1024},
+		{"512MB", 512 << 20},
+		{"512mb", 512 << 20},
+		{" 2GB ", 2 << 30},
+		{"64KB", 64 << 10},
+	} {
+		got, err := parseUploadSize(tc.in)
+		if err != nil {
+			t.Errorf("parseUploadSize(%q) errored: %v", tc.in, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("parseUploadSize(%q) = %d, want %d", tc.in, got, tc.want)
+		}
+	}
+	for _, bad := range []string{"", "0", "-5", "abc", "12PB", "9223372036854775807GB"} {
+		if _, err := parseUploadSize(bad); err == nil {
+			t.Errorf("expected error for --max-upload %q, got nil", bad)
+		}
+	}
+}

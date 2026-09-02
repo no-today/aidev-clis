@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -289,6 +290,29 @@ func headerMap(headers []string) map[string]string {
 		out[k] = strings.TrimSpace(v)
 	}
 	return out
+}
+
+// parseUploadSize accepts a byte count with an optional KB/MB/GB suffix
+// (case-insensitive); a bare number is bytes. The cap it feeds is a RAM
+// guardrail, not a protocol limit — upload bytes never enter the JSON envelope.
+func parseUploadSize(s string) (int64, error) {
+	invalid := errs.Config("MAX_UPLOAD_INVALID",
+		"--max-upload must be a positive size like 512MB, 2GB, or a plain byte count: "+s)
+	t := strings.TrimSpace(strings.ToUpper(s))
+	mult := int64(1)
+	switch {
+	case strings.HasSuffix(t, "GB"):
+		mult, t = 1<<30, strings.TrimSuffix(t, "GB")
+	case strings.HasSuffix(t, "MB"):
+		mult, t = 1<<20, strings.TrimSuffix(t, "MB")
+	case strings.HasSuffix(t, "KB"):
+		mult, t = 1<<10, strings.TrimSuffix(t, "KB")
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(t), 10, 64)
+	if err != nil || n <= 0 || n > (1<<62)/mult {
+		return 0, invalid
+	}
+	return n * mult, nil
 }
 
 func toString(v any) string {
