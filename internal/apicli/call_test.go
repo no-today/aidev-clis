@@ -108,6 +108,7 @@ func TestCallReplaysMultipartBodyByteIdentical(t *testing.T) {
 	writeHome(t, sampleAPICLI, sampleActors)
 	var logins int32
 	var bodies [][]byte
+	var contentTypes []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/auth/login":
@@ -116,6 +117,7 @@ func TestCallReplaysMultipartBodyByteIdentical(t *testing.T) {
 		default:
 			b, _ := io.ReadAll(r.Body)
 			bodies = append(bodies, b)
+			contentTypes = append(contentTypes, r.Header.Get("Content-Type"))
 			if r.Header.Get("Authorization") == "Bearer fresh" {
 				_, _ = w.Write([]byte(`{"code":0,"data":"ok"}`))
 			} else {
@@ -172,6 +174,12 @@ func TestCallReplaysMultipartBodyByteIdentical(t *testing.T) {
 	}
 	if !bytes.Equal(bodies[0], body) {
 		t.Fatalf("sent body does not match the once-encoded body — re-encoding happened somewhere")
+	}
+	if contentTypes[0] != contentTypes[1] {
+		t.Fatalf("Content-Type changed between the two sends: 1st=%q 2nd=%q", contentTypes[0], contentTypes[1])
+	}
+	if contentTypes[0] != ct {
+		t.Fatalf("sent Content-Type %q does not match the once-encoded Content-Type %q", contentTypes[0], ct)
 	}
 }
 
