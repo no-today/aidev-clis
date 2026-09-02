@@ -74,16 +74,26 @@ func writeFixture(t *testing.T, name string, content []byte) string {
 	return p
 }
 
+// decodedPart is one part's contents, captured eagerly. NextPart closes the
+// previous part, so a []*multipart.Part collected across the loop would read
+// back empty — the content must be pulled before advancing.
+type decodedPart struct {
+	name     string
+	filename string
+	ctype    string
+	content  []byte
+}
+
 // decodeParts re-reads an encoded body with the stdlib reader so assertions are
 // made against what a real server would see, not against our own encoder.
-func decodeParts(t *testing.T, body []byte, contentType string) []*multipart.Part {
+func decodeParts(t *testing.T, body []byte, contentType string) []decodedPart {
 	t.Helper()
 	_, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
 		t.Fatalf("bad content type %q: %v", contentType, err)
 	}
 	r := multipart.NewReader(bytes.NewReader(body), params["boundary"])
-	var out []*multipart.Part
+	var out []decodedPart
 	for {
 		p, err := r.NextPart()
 		if err == io.EOF {
@@ -92,7 +102,16 @@ func decodeParts(t *testing.T, body []byte, contentType string) []*multipart.Par
 		if err != nil {
 			t.Fatalf("next part: %v", err)
 		}
-		out = append(out, p)
+		content, err := io.ReadAll(p)
+		if err != nil {
+			t.Fatalf("read part %q: %v", p.FormName(), err)
+		}
+		out = append(out, decodedPart{
+			name:     p.FormName(),
+			filename: p.FileName(),
+			ctype:    p.Header.Get("Content-Type"),
+			content:  content,
+		})
 	}
 }
 
@@ -117,26 +136,25 @@ func TestEncodeFormRoundTrip(t *testing.T) {
 	}
 	// Order is preserved, and both file parts keep the same field name —
 	// this is what binds to a Spring List<MultipartFile>.
-	if got[0].FormName() != "entranceExitId" || got[0].FileName() != "" {
-		t.Errorf("part 0 should be a plain field: name=%q file=%q", got[0].FormName(), got[0].FileName())
+	if got[0].name != "entranceExitId" || got[0].filename != "" {
+		t.Errorf("part 0 should be a plain field: name=%q file=%q", got[0].name, got[0].filename)
 	}
-	v, _ := io.ReadAll(got[0])
-	if string(v) != "11085" {
-		t.Errorf("plain value = %q, want 11085", v)
+	if string(got[0].content) != "11085" {
+		t.Errorf("plain value = %q, want 11085", got[0].content)
 	}
-	if got[1].FormName() != "images" || got[1].FileName() != "a.png" {
-		t.Errorf("part 1 wrong: name=%q file=%q", got[1].FormName(), got[1].FileName())
+	if got[1].name != "images" || got[1].filename != "a.png" {
+		t.Errorf("part 1 wrong: name=%q file=%q", got[1].name, got[1].filename)
 	}
 	// .png is inferred from the extension.
-	if ct1 := got[1].Header.Get("Content-Type"); ct1 != "image/png" {
-		t.Errorf("part 1 content-type = %q, want image/png", ct1)
+	if got[1].ctype != "image/png" {
+		t.Errorf("part 1 content-type = %q, want image/png", got[1].ctype)
 	}
 	// Explicit ;type= and ;filename= win over inference.
-	if got[2].FileName() != "renamed.jpg" {
-		t.Errorf("part 2 filename = %q, want renamed.jpg", got[2].FileName())
+	if got[2].filename != "renamed.jpg" {
+		t.Errorf("part 2 filename = %q, want renamed.jpg", got[2].filename)
 	}
-	if ct2 := got[2].Header.Get("Content-Type"); ct2 != "image/jpeg" {
-		t.Errorf("part 2 content-type = %q, want image/jpeg", ct2)
+	if got[2].ctype != "image/jpeg" {
+		t.Errorf("part 2 content-type = %q, want image/jpeg", got[2].ctype)
 	}
 	// Sizes are recorded back into parts for the audit record.
 	if parts[1].Bytes != 3 || parts[2].Bytes != 4 {
@@ -165,12 +183,8 @@ func TestEncodeFormIsBinarySafe(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("want 1 part, got %d", len(got))
 	}
-	back, err := io.ReadAll(got[0])
-	if err != nil {
-		t.Fatalf("read part: %v", err)
-	}
-	if sha256.Sum256(back) != sha256.Sum256(raw) {
-		t.Fatalf("bytes altered in transit:\n got %x\nwant %x", back, raw)
+	if sha256.Sum256(got[0].content) != sha256.Sum256(raw) {
+		t.Fatalf("bytes altered in transit:\n got %x\nwant %x", got[0].content, raw)
 	}
 }
 
