@@ -921,7 +921,6 @@ Inside `RunE`, immediately after `method = strings.ToUpper(method)`, insert:
 					method = http.MethodPost
 				}
 				var formParts []apicli.FormPart
-				var formBody []byte
 				var formContentType string
 				if len(form) > 0 {
 					formParts, err = apicli.ParseFormArgs(form)
@@ -982,9 +981,6 @@ And update the request literal to use them:
 					AllowCrossOrigin: allowCrossOrigin,
 				}
 ```
-
-Delete the now-unused `formBody` declaration from the block added earlier —
-`body` carries the encoding.
 
 Finally, register the flags beside the existing ones:
 
