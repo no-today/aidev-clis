@@ -1,0 +1,73 @@
+# Integration DBs for dbcli. Non-default host ports to avoid clashing with any
+# local install. Seed SQL under ./seed/<engine>/ runs on first init.
+#   make db-up   /   make db-down   (see Makefile)
+services:
+  mysql:
+    image: mysql:8.0.36
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpw
+    ports:
+      - "13306:3306"
+    volumes:
+      - ./seed/mysql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-prootpw"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # SSH bastion for tunnel integration tests. Shares the network, reaches
+  # mysql:3306. Password auth for user 'deploy'; TCP forwarding enabled.
+  # Building it fetches openssh (needs build-time network). Behind a CN proxy:
+  #   docker build --build-arg http_proxy=http://host.docker.internal:7897 \
+  #     --build-arg https_proxy=http://host.docker.internal:7897 \
+  #     -t integration-bastion test/integration/bastion/
+  # then `make db-up` reuses the cached image.
+  bastion:
+    build: ./bastion
+    ports:
+      - "2222:22"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pidof sshd || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ping:1}).ok"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "16379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: bizdb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: rootpw
+    ports:
+      - "15432:5432"
+    volumes:
+      - ./seed/pg:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d bizdb"]
+      interval: 3s
+      timeout: 3s
+      retries: 20

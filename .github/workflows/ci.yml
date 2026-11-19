@@ -1,0 +1,77 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # Build + unit tests on every OS we ship. The Makefile's crossbuild only
+  # compiles for other GOOS; this actually runs the tests on each platform.
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: go build (all)
+        run: go build ./...
+      - name: go test (all)
+        run: go test ./...
+
+  # OS-agnostic gates, run once on Linux (mirrors `make check` minus tests).
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          fmt=$(gofmt -l .)
+          if [ -n "$fmt" ]; then echo "gofmt needed:"; echo "$fmt"; exit 1; fi
+      - name: go vet
+        run: go vet ./...
+      - name: isolation guards
+        run: bash scripts/check-isolation.sh
+      - name: crossbuild (windows/linux/darwin)
+        run: |
+          GOOS=windows GOARCH=amd64 go build ./...
+          GOOS=linux   GOARCH=amd64 go build ./...
+          GOOS=darwin  GOARCH=arm64 go build ./...
+
+  # Windows-only: the PowerShell installer + a real install/runtime/uninstall
+  # smoke that the cross-platform test job can't cover.
+  windows-smoke:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Lint PowerShell (PSScriptAnalyzer)
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+          $settings = 'scripts/PSScriptAnalyzerSettings.psd1'
+          $targets = @('scripts/install.ps1', 'scripts/uninstall.ps1', 'scripts/ci/windows-smoke.ps1')
+          $findings = @()
+          foreach ($f in $targets) {
+              $findings += Invoke-ScriptAnalyzer -Path $f -Settings $settings -Severity Error, Warning
+          }
+          if ($findings) {
+              $findings | Format-Table -AutoSize ScriptName, Line, Severity, RuleName, Message
+              throw "PSScriptAnalyzer found $($findings.Count) issue(s)"
+          }
+          Write-Host 'PSScriptAnalyzer clean'
+      - name: Windows install + runtime smoke test
+        run: scripts/ci/windows-smoke.ps1

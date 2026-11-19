@@ -1,0 +1,8 @@
+# Copy to a project root to scope `aidev` discovery to one scene. Optional — with
+# no marker (and no AIDEV_SCENE), every configured target/app is in scope.
+#
+# How scenes work: tag targets/apps with `scene: <name>` in the per-tool configs
+# (dbcli/jcli/logcli targets, httpcli apps). `aidev` joins targets by NAME across tools.
+# A target is global only when that name has no scene tag in any of the three tools.
+# An app without a scene tag is global too. See docs/cli-aidev.md.
+scene: companyA
