@@ -3,6 +3,13 @@
 本文件记录 aidev-clis 的所有显著变更。
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 修复
+
+- `httpcli call --output-file`：`body_bytes`、`content_length`、`stream_complete` 在下载时总是输出（含 0 / false），空导出与复制失败可以区分；内联响应不再带这些字段。
+- 文档：输出契约补全"非零退出仍返回 `data`"的情形（httpcli 业务失败、tcli 裁决）；安全模型写明 tcli 自身不写审计、由其调起的子 CLI 各自审计。
+
 ## [0.1.0] - 2026-11-19
 
 首个开源版本：六个原子能力 CLI，为无法建立本地验证闭环的老系统补上一条 AI 可执行的旁路验证链。

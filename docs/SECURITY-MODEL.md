@@ -86,10 +86,13 @@ These hold for every CLI, every adapter, every invocation:
    business data. Credential bytes stay absent because adapters inject them
    separately, not because the audit layer filters secrets. Audit day-files are
    created with `0600` permissions.
-3. **Every invocation is audited.** A JSON line is appended to the current
+3. **Every backend-touching invocation is audited.** A JSON line is appended to the current
    day-file `~/.aidev-clis/audit/<YYYYMMDD>.jsonl` on every run: `time`, `tool`,
    `backend`, `target`, the full-argv `command`, `outcome`, and — when they apply
    — an error `code`, a `request` summary (httpcli/jcli), and a `result` summary.
    Side-effecting ops audit in two phases (a started line, then a terminal line)
    that share an `id`, so a killed run still leaves a trace. There is no silent
-   path. Day-files older than 30 days are pruned automatically.
+   path. Day-files older than 30 days are pruned automatically. `tcli` writes
+   no lines of its own: it never contacts a backend directly, and each
+   httpcli/dbcli/logcli subprocess it runs audits itself (`validate`/`explain`
+   are purely local).

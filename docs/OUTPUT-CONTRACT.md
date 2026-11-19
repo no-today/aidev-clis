@@ -102,5 +102,14 @@ Nothing else.
 | `5` | Remote error (backend returned an error or was unreachable) |
 
 Exit code and JSON envelope always agree: exit 0 implies `data` present; exit
-non-zero implies `error` present — **except `doctor`, which reports a failed
-stage inside `data` with a non-zero exit (see above).**
+non-zero implies `error` present — **except where a completed run reports a
+negative result inside `data` with exit `1`:**
+
+- `doctor` — a failed stage (see above).
+- `httpcli call` — the request completed but the app's `ok_when` predicate
+  failed (`data.ok: false`).
+- `tcli run` / `tcli validate` — the report is in `data`; the exit code is the
+  verdict (FAIL or invalid case).
+
+In these cases read `data` for the details; an `error` envelope still means the
+command itself could not run.

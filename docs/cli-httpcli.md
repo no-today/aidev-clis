@@ -86,7 +86,10 @@ httpcli call shop /api/export --actor demo \
 - `body_bytes` — bytes actually written to disk. `content_length` — the
   server-declared length (`-1` if the response had no `Content-Length`).
   `stream_complete` — the body read finished without error.
-- **Empty vs incomplete downloads.** Check `stream_complete` first. An absent or false value means the copy did not finish. Zero byte counts are omitted. A complete stream with no `body_bytes` is empty.
+- **Empty vs incomplete downloads.** With `--output-file` these three fields are
+  always present, zeros included: `stream_complete && body_bytes == 0` → upstream
+  exported nothing; `!stream_complete` or `body_bytes < content_length` (when
+  `content_length` ≥ 0) → the copy was truncated / failed.
 - `--headers-file` writes `{status_code, url, headers}` — so a script can read
   `Content-Disposition` (filename), `Content-Type`, or a header-borne trace id
   even though the body never enters the envelope.

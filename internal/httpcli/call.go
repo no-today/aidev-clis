@@ -9,18 +9,20 @@ import (
 
 // CallResult is the classified outcome of Call.
 type CallResult struct {
-	Status         int               `json:"status_code"`
-	OK             bool              `json:"ok"`
-	Headers        map[string]string `json:"headers"`
-	Body           any               `json:"body,omitempty"`
-	TraceID        string            `json:"trace_id,omitempty"`
-	BodyFile       string            `json:"body_file,omitempty"`
-	BodyBytes      int64             `json:"body_bytes,omitempty"`
-	ContentLength  int64             `json:"content_length,omitempty"`
-	StreamComplete bool              `json:"stream_complete,omitempty"`
-	SHA256         string            `json:"sha256,omitempty"`
-	HeadersFile    string            `json:"headers_file,omitempty"`
-	Relogged       bool              `json:"-"`
+	Status   int               `json:"status_code"`
+	OK       bool              `json:"ok"`
+	Headers  map[string]string `json:"headers"`
+	Body     any               `json:"body,omitempty"`
+	TraceID  string            `json:"trace_id,omitempty"`
+	BodyFile string            `json:"body_file,omitempty"`
+	// Download metadata: set only with --output-file, and then always present
+	// (zero/false included) so an empty export is distinguishable from a failed copy.
+	BodyBytes      *int64 `json:"body_bytes,omitempty"`
+	ContentLength  *int64 `json:"content_length,omitempty"`
+	StreamComplete *bool  `json:"stream_complete,omitempty"`
+	SHA256         string `json:"sha256,omitempty"`
+	HeadersFile    string `json:"headers_file,omitempty"`
+	Relogged       bool   `json:"-"`
 }
 
 // Call loads the session, sends the request, auto-relogins once on expiry, and
@@ -84,9 +86,9 @@ func Call(tg *Target, req *CallRequest) (*CallResult, error) {
 	}
 	if resp.BodyFile != "" {
 		res.BodyFile = resp.BodyFile
-		res.BodyBytes = resp.BodyBytes
-		res.ContentLength = resp.ContentLength
-		res.StreamComplete = resp.StreamComplete
+		res.BodyBytes = &resp.BodyBytes
+		res.ContentLength = &resp.ContentLength
+		res.StreamComplete = &resp.StreamComplete
 		res.SHA256 = resp.SHA256
 		res.HeadersFile = req.HeadersFile
 	} else {

@@ -218,6 +218,53 @@ func TestCallOutputFileEnvelopeIsMetadata(t *testing.T) {
 	}
 }
 
+// An empty download must still report body_bytes 0 and stream_complete true, so
+// callers can tell "exported nothing" from "copy failed".
+func TestCallOutputFileEmptyBodyKeepsZeroFields(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+	home := t.TempDir()
+	t.Setenv("AIDEV_CLIS_HOME", home)
+	writeHttpcliYAML(t, home, srv.URL)
+	out := filepath.Join(home, "empty.bin")
+	raw := runCLI(t, "call", "shop", "/export", "--base-url", srv.URL, "--output-file", out)
+	var env struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatalf("bad envelope: %s", raw)
+	}
+	if v, ok := env.Data["body_bytes"]; !ok || v != float64(0) {
+		t.Fatalf("body_bytes missing or nonzero: %s", raw)
+	}
+	if v, ok := env.Data["stream_complete"]; !ok || v != true {
+		t.Fatalf("stream_complete missing or false: %s", raw)
+	}
+	if _, ok := env.Data["content_length"]; !ok {
+		t.Fatalf("content_length missing: %s", raw)
+	}
+}
+
+// Inline responses carry no download metadata.
+func TestCallInlineOmitsDownloadFields(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"code":0}`))
+	}))
+	defer srv.Close()
+	home := t.TempDir()
+	t.Setenv("AIDEV_CLIS_HOME", home)
+	writeHttpcliYAML(t, home, srv.URL)
+	raw := runCLI(t, "call", "shop", "/x", "--base-url", srv.URL)
+	for _, k := range []string{"body_bytes", "content_length", "stream_complete"} {
+		if bytes.Contains(raw, []byte(`"`+k+`"`)) {
+			t.Fatalf("inline response should omit %s: %s", k, raw)
+		}
+	}
+}
+
 func TestCallCrossOriginGuardAndOverride(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
