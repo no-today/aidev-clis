@@ -10,8 +10,8 @@ The tightest possible loop is local: **edit → compile → unit test**. It runs
 seconds, needs nothing but the source tree, and the result is unambiguous. When
 this loop is available, nothing here beats it — prefer it, always.
 
-But much real work happens where that loop does not exist or is too slow: legacy
-services with no unit tests, behaviour that only appears against a real database,
+But much real work happens where that loop cannot reach: flows that cross
+service boundaries, behaviour that only appears against a real database,
 bugs that only surface in production logs. There the single source of truth is
 the **running system itself**. To get an answer the agent has to observe that
 system's state, and sometimes operate its levers.
