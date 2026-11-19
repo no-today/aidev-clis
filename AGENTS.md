@@ -1,7 +1,8 @@
 # AGENTS.md
 
 You're iterating on **aidev-clis**: a suite of atomic-capability CLIs that let an
-AI agent read/observe/operate on running systems without ever seeing a credential.
+AI agent read/observe/operate on running systems, with credentials injected by the CLI
+rather than passed through the agent's context (not a sandbox; see docs/SECURITY-MODEL.md).
 This file is the entry point for that work. Humans start at
 [README.md](README.md); agents *using* a CLI at runtime read the matching
 `skills/aidev-<cli>/SKILL.md`; this file is for changing the repo itself.

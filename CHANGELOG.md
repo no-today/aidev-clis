@@ -12,7 +12,7 @@
 
 ## [0.1.0] - 2026-11-19
 
-首个开源版本：六个原子能力 CLI，让 AI agent 在运行中的系统上验证改动，全程不接触凭据。
+首个开源版本：六个原子能力 CLI，打通部署、接口调用、数据查询、日志追踪这条验证链路，让 AI agent 自己走完。
 
 ### 六个 CLI
 
@@ -26,7 +26,7 @@
 ### 契约与基础设施
 
 - AI-first 输出契约：所有命令默认 JSON envelope，`--output raw` 为可选的人类可读形式；NDJSON 流、diagnostics 和统一退出码。
-- 安全模型：凭据只存本机、对 agent 不可见；写操作守卫、二级 allowlist 和本地审计日志。
+- 安全模型：凭据只存本机，由 CLI 注入，不进入 agent 的上下文和输出（不是沙箱，权限边界在后端账号）；写操作守卫、二级 allowlist 和本地审计日志。
 - Adapter 隔离：db/log 后端自包含，新增注册一行、删除移除一个目录；`make check` 内置隔离守卫。
 - 跨平台：Linux / macOS / Windows；bash 与 PowerShell 安装脚本对等；goreleaser 发布六平台预编译包。
 - 随安装分发 agent skills（含 Agent Skills 标准目录 `~/.agents/skills`）和 shell completion。
