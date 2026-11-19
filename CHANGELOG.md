@@ -3,18 +3,6 @@
 本文件记录 aidev-clis 的所有显著变更。
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
-
-### 变更
-
-- `dbcli` / `logcli` 收到 `--env` 时的错误码改为 `ENV_FLAG_UNSUPPORTED`（原 `LEGACY_FLAG`），提示改用 `--target`。仍然拒绝执行：`--env` 是 httpcli 的参数，容易误用，放行会让查询悄悄落到默认 target。
-- `examples/tcli-case.yaml`：创建订单后的断言改为订单数大于基线（原来写成等于，示例必然失败）。
-
-### 修复
-
-- `httpcli call --output-file`：`body_bytes`、`content_length`、`stream_complete` 在下载时总是输出（含 0 / false），空导出与复制失败可以区分；内联响应不再带这些字段。
-- 文档：输出契约补全"非零退出仍返回 `data`"的情形（httpcli 业务失败、tcli 裁决）；安全模型写明 tcli 自身不写审计、由其调起的子 CLI 各自审计。
-
 ## [0.1.0] - 2026-11-19
 
 首个开源版本：六个原子能力 CLI，在代码权限之外，为 AI agent 补齐发布、调用、日志、数据库四种权限，让验证改动在真实环境里闭环。
