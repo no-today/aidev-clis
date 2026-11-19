@@ -5,6 +5,11 @@
 
 ## [Unreleased]
 
+### 变更
+
+- `dbcli` / `logcli` 收到 `--env` 时的错误码改为 `ENV_FLAG_UNSUPPORTED`（原 `LEGACY_FLAG`），提示改用 `--target`。仍然拒绝执行：`--env` 是 httpcli 的参数，容易误用，放行会让查询悄悄落到默认 target。
+- `examples/tcli-case.yaml`：创建订单后的断言改为订单数大于基线（原来写成等于，示例必然失败）。
+
 ### 修复
 
 - `httpcli call --output-file`：`body_bytes`、`content_length`、`stream_complete` 在下载时总是输出（含 0 / false），空导出与复制失败可以区分；内联响应不再带这些字段。
@@ -12,7 +17,7 @@
 
 ## [0.1.0] - 2026-11-19
 
-首个开源版本：六个原子能力 CLI，打通部署、接口调用、数据查询、日志追踪这条验证链路，让 AI agent 自己走完。
+首个开源版本：六个原子能力 CLI，在代码权限之外，为 AI agent 补齐发布、调用、日志、数据库四种权限，让验证改动在真实环境里闭环。
 
 ### 六个 CLI
 

@@ -74,7 +74,7 @@ type cliFlags struct {
 	pretty     bool
 	verbose    int
 	badFlag    string
-	legacyEnv  bool   // legacy --env given (renamed to --target)
+	envFlag    bool   // --env given (dbcli selects with --target)
 	file       string // --file: read the SQL from a file ("-" = stdin)
 	rest       []string
 }
@@ -132,8 +132,8 @@ func main() {
 			if f.configDir != "" {
 				_ = os.Setenv("AIDEV_CLIS_HOME", f.configDir)
 			}
-			if f.legacyEnv {
-				e := errs.New("LEGACY_FLAG", "--env was renamed to --target; pass --target <name> (see `dbcli targets`)", 2)
+			if f.envFlag {
+				e := errs.New("ENV_FLAG_UNSUPPORTED", "dbcli selects an instance with --target, not --env (--env is httpcli's); pass --target <name> (see `dbcli targets`)", 2)
 				audit.Begin(audit.Record{Tool: "dbcli", Backend: f.driver, Command: cmd}).Finish(e, nil)
 				writeCmdErr(os.Stdout, raw, f.pretty, e.Code, e.Message)
 				os.Exit(2)
@@ -264,11 +264,11 @@ func parseArgs(args []string) cliFlags {
 			f.allowWrite = flagBool(strings.TrimPrefix(a, "--allow-write="))
 		case matches(a, "--target"):
 			f.target = take(&i, "--target")
-		// Legacy selector: --env was renamed to --target (2026-07). Without this
-		// case its value leaks into the SQL args and the query resolves against
-		// the default target — potentially the wrong database. Reject loudly.
+		// --env is httpcli's environment selector and an easy slip here. Without
+		// this case its value leaks into the SQL args and the query resolves
+		// against the default target — potentially the wrong database. Reject loudly.
 		case matches(a, "--env"):
-			f.legacyEnv = true
+			f.envFlag = true
 			take(&i, "--env")
 			f.badFlag = ""
 		case matches(a, "--database"):

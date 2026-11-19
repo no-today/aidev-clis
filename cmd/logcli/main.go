@@ -54,7 +54,7 @@ type cliFlags struct {
 	fields    string   // comma-separated record-field projection ("" = full records)
 	rest      []string // pass-through args for the adapter
 	badFlag   string   // a logcli value-flag given with no value (e.g. `--target` at end)
-	legacyEnv bool     // legacy --env given (renamed to --target)
+	envFlag   bool     // --env given (logcli selects with --target)
 }
 
 // writeCmdErr emits a cmd-layer error: a plain "ERROR code: msg" line in raw
@@ -107,12 +107,12 @@ func main() {
 				_ = os.Setenv("AIDEV_CLIS_HOME", f.configDir)
 			}
 
-			if f.legacyEnv {
-				msg := "--env was renamed to --target; pass --target <name> (see `logcli targets`)"
+			if f.envFlag {
+				msg := "logcli selects an instance with --target, not --env (--env is httpcli's); pass --target <name> (see `logcli targets`)"
 				audit.Begin(audit.Record{
 					Tool: "logcli", Backend: f.adapter, Command: audit.CommandLine(os.Args),
-				}).Finish(errs.Config("LEGACY_FLAG", msg), nil)
-				writeCmdErr(os.Stdout, raw, f.pretty, "LEGACY_FLAG", msg)
+				}).Finish(errs.Config("ENV_FLAG_UNSUPPORTED", msg), nil)
+				writeCmdErr(os.Stdout, raw, f.pretty, "ENV_FLAG_UNSUPPORTED", msg)
 				os.Exit(2) // ExitConfig
 			}
 			if f.badFlag != "" {
@@ -242,15 +242,14 @@ func parseArgs(args []string) cliFlags {
 			f.verbose += len(a) - 1 // -v=1, -vv=2, ...
 		case matches(a, "--target"):
 			f.target = take(&f, &i, "--target")
-		// Legacy selector: --env was renamed to --target (2026-07). Without this
-		// case it would fall through to f.rest as an adapter arg, be silently
+		// --env is httpcli's environment selector and an easy slip here. Without
+		// this case it would fall through to f.rest as an adapter arg, be silently
 		// ignored, and the query would run against default_target — returning
-		// plausible data from the WRONG target (observed in the wild: half a
-		// session of wrong-logstore diagnosis). Reject loudly instead.
+		// plausible data from the WRONG target. Reject loudly instead.
 		case matches(a, "--env"):
-			f.legacyEnv = true
+			f.envFlag = true
 			take(&f, &i, "--env") // consume its value so it doesn't leak into rest
-			f.badFlag = ""        // BAD_FLAG is moot; LEGACY_FLAG supersedes
+			f.badFlag = ""        // BAD_FLAG is moot; ENV_FLAG_UNSUPPORTED supersedes
 		case matches(a, "--fields"):
 			f.fields = take(&f, &i, "--fields")
 		case matches(a, "--config-dir"):

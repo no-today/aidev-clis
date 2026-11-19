@@ -91,7 +91,7 @@ steps:
         - count >= 1                          # mongo find -> document array; count counts docs
         - 0.status == confirmed               # docs addressed by index: <n>.<field>
 
-  - name: re-read baseline for a cross-phase stability check
+  - name: re-read the order count after the create
     db:
       target: main
       sql: "SELECT count(*) AS n FROM orders WHERE customer = '{{customer}}'"
@@ -129,8 +129,8 @@ steps:
 assertions:
   - name: API outcome matches DB evidence
     expect: [ "{{db_status}} == confirmed" ]
-  - name: order metric stable across the run
-    expect: [ "{{count_now}} == {{baseline}}" ]
+  - name: order count grew after the create
+    expect: [ "{{count_now}} > {{baseline}}" ]
   - name: a correlation id was captured
     expect: [ "{{corr}} exists" ]
 

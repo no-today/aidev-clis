@@ -156,21 +156,21 @@ func contains(xs []string, want string) bool {
 	return false
 }
 
-// Legacy --env (renamed to --target) must be detected — not forwarded to the
+// --env (httpcli's selector, not logcli's) must be detected — not forwarded to the
 // adapter, where it would be silently ignored and the query would run against
 // default_target (the wrong-logstore trap).
-func TestParseArgs_LegacyEnvDetected(t *testing.T) {
+func TestParseArgs_EnvFlagRejected(t *testing.T) {
 	f := parseArgs([]string{"sls", "--env", "qyry", "search", "x"})
-	if !f.legacyEnv {
-		t.Fatal("--env must set legacyEnv")
+	if !f.envFlag {
+		t.Fatal("--env must set envFlag")
 	}
 	for _, a := range f.rest {
 		if a == "--env" || a == "qyry" {
 			t.Fatalf("--env and its value must not leak into adapter args: %v", f.rest)
 		}
 	}
-	if f2 := parseArgs([]string{"sls", "--env=qyry", "search", "x"}); !f2.legacyEnv {
-		t.Fatal("--env=value form must set legacyEnv")
+	if f2 := parseArgs([]string{"sls", "--env=qyry", "search", "x"}); !f2.envFlag {
+		t.Fatal("--env=value form must set envFlag")
 	}
 }
 
