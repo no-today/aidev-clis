@@ -23,6 +23,30 @@ flowchart LR
 
 每个 CLI 默认输出结构化 JSON，访问后端的调用都会写审计。几个 CLI 互相独立：没有 Jenkins 的团队，发布这一环换成自己的部署脚本或 CI 即可，其余 CLI 照常使用。
 
+## 系统架构
+
+```mermaid
+flowchart LR
+  Actor["AI agent / CI / Operator"] --> CLIs
+
+  subgraph CLIs["aidev-clis"]
+    direction LR
+    aidev["aidev<br/>Discovery / Config backup"]
+    jcli["jcli<br/>Jenkins"]
+    httpcli["httpcli<br/>HTTP"]
+    dbcli["dbcli<br/>DB"]
+    logcli["logcli<br/>logs"]
+    tcli["tcli<br/>case runner"]
+  end
+
+  tcli -.->|delegates| httpcli
+  tcli -.->|delegates| dbcli
+  tcli -.->|delegates| logcli
+
+  CLIs --> Core["Local control plane<br/>config · credentials · sessions · audit"]
+  Core --> Backends["Runtime backends<br/>DB · logs · HTTP apps · Jenkins"]
+```
+
 ## 六个 CLI
 
 | CLI | 负责 | 用途 | 典型命令 |
